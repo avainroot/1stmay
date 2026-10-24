@@ -131,8 +131,8 @@ jobs:
           name: launcher-release
           if-no-files-found: error
           path: |
-            src-tauri/target/release/bundle/nsis/firstmay-launcher-*.exe
-            src-tauri/target/release/bundle/nsis/firstmay-launcher-*.exe.sig
+            src-tauri/target/release/bundle/nsis/1stmay-launcher-*.exe
+            src-tauri/target/release/bundle/nsis/1stmay-launcher-*.exe.sig
             src-tauri/target/release/bundle/nsis/manifest.json
 
   deploy:
@@ -179,10 +179,14 @@ jobs:
 
           version="$(python3 -c 'import json; print(json.load(open("release/manifest.json", encoding="utf-8"))["version"])')"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          installer="firstmay-launcher-${version}.exe"
-          test -s "release/$installer"
-          test -s "release/$installer.sig"
-          test -s release/manifest.json
+          installer="1stmay-launcher-${version}.exe"
+          for file in "release/$installer" "release/$installer.sig" release/manifest.json; do
+            if [[ ! -s "$file" ]]; then
+              echo "Required release artifact is missing or empty: $file" >&2
+              ls -la release >&2
+              exit 1
+            fi
+          done
 
           remote="root@$SERVER_IP"
           stage="${VDS_RELEASE_DIR}/.launcher-deploy-${GITHUB_RUN_ID}"
@@ -197,7 +201,7 @@ jobs:
           release_dir=$1
           stage_dir=$2
           version=$3
-          installer="firstmay-launcher-${version}.exe"
+          installer="1stmay-launcher-${version}.exe"
           trap 'rm -rf -- "$stage_dir"' EXIT
 
           install -m 0644 "$stage_dir/$installer" "$release_dir/.$installer.new"
@@ -208,6 +212,6 @@ jobs:
           mv -f -- "$release_dir/.manifest.json.new" "$release_dir/manifest.json"
 
           find "$release_dir" -maxdepth 1 -type f \
-            \( -name 'firstmay-launcher-*.exe' -o -name 'firstmay-launcher-*.exe.sig' \) \
+            \( -name '1stmay-launcher-*.exe' -o -name '1stmay-launcher-*.exe.sig' \) \
             ! -name "$installer" ! -name "$installer.sig" -delete
           REMOTE
