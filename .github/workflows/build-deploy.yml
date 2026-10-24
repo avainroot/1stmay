@@ -137,7 +137,7 @@ jobs:
 
   deploy:
     needs: [verify, release]
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     env:
       SERVER_IP: ${{ secrets.SERVER_IP }}
       VDS_RELEASE_DIR: ${{ secrets.VDS_RELEASE_DIR }}
@@ -154,86 +154,45 @@ jobs:
           log-public-key: false
 
       - name: Add server to known hosts
-        shell: pwsh
+        shell: bash
         run: |
-          if ($env:SERVER_IP -notmatch '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') {
-            throw "SERVER_IP must be an IPv4 address."
-          }
-          $parsedIp = [System.Net.IPAddress]::Parse($env:SERVER_IP)
-          if ($parsedIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
-            throw "SERVER_IP must be an IPv4 address."
-          }
-          $sshDirectory = Join-Path $HOME ".ssh"
-          New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
-          $knownHostsPath = Join-Path $sshDirectory "known_hosts"
-          $scanResult = & ssh-keyscan -T 10 $env:SERVER_IP 2>$null
-          if ($LASTEXITCODE -ne 0 -or !$scanResult) {
-            throw "Could not retrieve the SSH host key from SERVER_IP."
-          }
-          $scanResult | Set-Content -Path $knownHostsPath -Encoding ascii
+          set -euo pipefail
+          python3 -c 'import ipaddress, os; ipaddress.IPv4Address(os.environ["SERVER_IP"])'
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          scan_result="$(ssh-keyscan -T 10 -H "$SERVER_IP" 2>/dev/null)"
+          if [[ -z "$scan_result" ]]; then
+            echo "Could not retrieve the SSH host key from SERVER_IP." >&2
+            exit 1
+          fi
+          printf '%s\n' "$scan_result" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Upload release and atomically publish manifest
-        shell: pwsh
+        shell: bash
         run: |
-          $required = @(
-            "SERVER_IP",
-            "VDS_RELEASE_DIR"
-          )
-          foreach ($name in $required) {
-            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-              throw "Required GitHub secret is missing: $name"
-            }
-          }
-          if ($env:SERVER_IP -notmatch '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' -or
-              $env:VDS_RELEASE_DIR -notmatch '^/[A-Za-z0-9._/-]+$' -or
-              $env:VDS_RELEASE_DIR.Contains("..")) {
-            throw "VDS SSH settings contain invalid characters."
-          }
-          $parsedIp = [System.Net.IPAddress]::Parse($env:SERVER_IP)
-          if ($parsedIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
-            throw "SERVER_IP must be an IPv4 address."
-          }
-          $ssh = Get-Command ssh -ErrorAction Stop
-          $scp = Get-Command scp -ErrorAction Stop
-          $manifest = Get-Content "release/manifest.json" -Raw | ConvertFrom-Json
-          $version = [string]$manifest.version
-          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
-            throw "Release manifest has an invalid version."
-          }
-          $installer = "firstmay-launcher-$version.exe"
-          foreach ($file in @($installer, "$installer.sig", "manifest.json")) {
-            if (!(Test-Path (Join-Path "release" $file)) -or
-                (Get-Item (Join-Path "release" $file)).Length -eq 0) {
-              throw "Release artifact is missing or empty: $file"
-            }
-          }
+          set -euo pipefail
+          : "${SERVER_IP:?Missing SERVER_IP secret}"
+          : "${VDS_RELEASE_DIR:?Missing VDS_RELEASE_DIR secret}"
+          [[ "$VDS_RELEASE_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          [[ "$VDS_RELEASE_DIR" != *".."* ]]
 
-          $sshDirectory = Join-Path $HOME ".ssh"
-          $knownHostsPath = Join-Path $sshDirectory "known_hosts"
+          version="$(python3 -c 'import json; print(json.load(open("release/manifest.json", encoding="utf-8"))["version"])')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          installer="firstmay-launcher-${version}.exe"
+          test -s "release/$installer"
+          test -s "release/$installer.sig"
+          test -s release/manifest.json
 
-          $remote = "root@$($env:SERVER_IP)"
-          $stage = "$($env:VDS_RELEASE_DIR)/.launcher-deploy-$env:GITHUB_RUN_ID"
-          $sshArgs = @(
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=$knownHostsPath"
-          )
-          & $ssh.Source @sshArgs $remote "mkdir -p -- '$env:VDS_RELEASE_DIR' '$stage'"
-          if ($LASTEXITCODE -ne 0) { throw "Could not create the VDS staging directory." }
+          remote="root@$SERVER_IP"
+          stage="${VDS_RELEASE_DIR}/.launcher-deploy-${GITHUB_RUN_ID}"
+          ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/known_hosts")
+          ssh "${ssh_args[@]}" "$remote" "mkdir -p -- '$VDS_RELEASE_DIR' '$stage'"
+          scp "${ssh_args[@]}" \
+            "release/$installer" "release/$installer.sig" release/manifest.json \
+            "$remote:$stage/"
 
-          $scpArgs = @(
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=$knownHostsPath",
-            (Join-Path "release" $installer),
-            (Join-Path "release" "$installer.sig"),
-            "release/manifest.json",
-            "${remote}:$stage/"
-          )
-          & $scp.Source @scpArgs
-          if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts to the VDS." }
-
-          $remoteScript = @'
+          ssh "${ssh_args[@]}" "$remote" sh -s -- "$VDS_RELEASE_DIR" "$stage" "$version" <<'REMOTE'
           set -eu
           release_dir=$1
           stage_dir=$2
@@ -251,6 +210,4 @@ jobs:
           find "$release_dir" -maxdepth 1 -type f \
             \( -name 'firstmay-launcher-*.exe' -o -name 'firstmay-launcher-*.exe.sig' \) \
             ! -name "$installer" ! -name "$installer.sig" -delete
-          '@
-          $remoteScript | & $ssh.Source @sshArgs $remote "sh -s -- '$env:VDS_RELEASE_DIR' '$stage' '$version'"
-          if ($LASTEXITCODE -ne 0) { throw "Could not publish release on the VDS." }
+          REMOTE
