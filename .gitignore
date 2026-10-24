@@ -1,0 +1,11 @@
+.env*
+!.env.example
+AGENTS.md
+.idea/
+.tmp/
+.cargo/config.toml
+**/target/
+dist/
+node_modules/
+*.key*
+*.sig

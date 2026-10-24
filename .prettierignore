@@ -1,0 +1,12 @@
+.env
+.env.*
+AGENTS.md
+.cargo/
+.idea/
+.tmp/
+node_modules/
+dist/
+**/target/
+pnpm-lock.yaml
+src-tauri/Cargo.lock
+src-tauri/icons/

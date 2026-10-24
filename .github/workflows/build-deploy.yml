@@ -1,0 +1,259 @@
+name: Build and deploy launcher
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    env:
+      QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS || 'remote.example:25565' }}
+      MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL || 'https://remote.example/mods.json' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Create CI-only build configuration
+        shell: pwsh
+        run: |
+          $lines = @(
+            "QUICK_PLAY_SERVER_ADDRESS=$env:QUICK_PLAY_SERVER_ADDRESS",
+            "MOD_MANIFEST_URL=$env:MOD_MANIFEST_URL"
+          )
+          [System.IO.File]::WriteAllLines(
+            (Join-Path $env:GITHUB_WORKSPACE ".env"),
+            $lines,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  release:
+    needs: verify
+    runs-on: windows-latest
+    env:
+      QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS }}
+      MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL }}
+      LAUNCHER_RELEASE_BASE_URL: ${{ secrets.LAUNCHER_RELEASE_BASE_URL }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - uses: actions/cache@v4
+        with:
+          path: C:\Program Files (x86)\NSIS
+          key: ${{ runner.os }}-nsis-3.11
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $nsis = "C:\Program Files (x86)\NSIS"
+          if (!(Test-Path (Join-Path $nsis "makensis.exe"))) {
+            choco install nsis --no-progress -y
+          }
+          if (!(Test-Path (Join-Path $nsis "makensis.exe"))) {
+            throw "NSIS installation was not found."
+          }
+          $nsis >> $env:GITHUB_PATH
+
+      - name: Validate release configuration and create build environment
+        shell: pwsh
+        run: |
+          $required = @(
+            "QUICK_PLAY_SERVER_ADDRESS",
+            "MOD_MANIFEST_URL",
+            "LAUNCHER_RELEASE_BASE_URL",
+            "TAURI_SIGNING_PRIVATE_KEY",
+            "TAURI_SIGNING_PUBLIC_KEY"
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Required GitHub secret is missing: $name"
+            }
+          }
+          $lines = @(
+            "QUICK_PLAY_SERVER_ADDRESS=$env:QUICK_PLAY_SERVER_ADDRESS",
+            "MOD_MANIFEST_URL=$env:MOD_MANIFEST_URL"
+          )
+          [System.IO.File]::WriteAllLines(
+            (Join-Path $env:GITHUB_WORKSPACE ".env"),
+            $lines,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-release
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/firstmay-launcher-*.exe
+            src-tauri/target/release/bundle/nsis/firstmay-launcher-*.exe.sig
+            src-tauri/target/release/bundle/nsis/manifest.json
+
+  deploy:
+    needs: [verify, release]
+    runs-on: windows-latest
+    env:
+      SERVER_IP: ${{ secrets.SERVER_IP }}
+      VDS_RELEASE_DIR: ${{ secrets.VDS_RELEASE_DIR }}
+      VDS_SSH_PRIVATE_KEY: ${{ secrets.VDS_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher-release
+          path: release
+
+      - name: Add server to known hosts
+        shell: pwsh
+        run: |
+          if ($env:SERVER_IP -notmatch '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') {
+            throw "SERVER_IP must be an IPv4 address."
+          }
+          $parsedIp = [System.Net.IPAddress]::Parse($env:SERVER_IP)
+          if ($parsedIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            throw "SERVER_IP must be an IPv4 address."
+          }
+          $sshDirectory = Join-Path $HOME ".ssh"
+          New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
+          $knownHostsPath = Join-Path $sshDirectory "known_hosts"
+          $scanResult = & ssh-keyscan -T 10 $env:SERVER_IP 2>$null
+          if ($LASTEXITCODE -ne 0 -or !$scanResult) {
+            throw "Could not retrieve the SSH host key from SERVER_IP."
+          }
+          $scanResult | Set-Content -Path $knownHostsPath -Encoding ascii
+
+      - name: Upload release and atomically publish manifest
+        shell: pwsh
+        run: |
+          $required = @(
+            "SERVER_IP",
+            "VDS_RELEASE_DIR",
+            "VDS_SSH_PRIVATE_KEY"
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Required GitHub secret is missing: $name"
+            }
+          }
+          if ($env:SERVER_IP -notmatch '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' -or
+              $env:VDS_RELEASE_DIR -notmatch '^/[A-Za-z0-9._/-]+$' -or
+              $env:VDS_RELEASE_DIR.Contains("..")) {
+            throw "VDS SSH settings contain invalid characters."
+          }
+          $parsedIp = [System.Net.IPAddress]::Parse($env:SERVER_IP)
+          if ($parsedIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            throw "SERVER_IP must be an IPv4 address."
+          }
+          $ssh = Get-Command ssh -ErrorAction Stop
+          $scp = Get-Command scp -ErrorAction Stop
+          $manifest = Get-Content "release/manifest.json" -Raw | ConvertFrom-Json
+          $version = [string]$manifest.version
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "Release manifest has an invalid version."
+          }
+          $installer = "firstmay-launcher-$version.exe"
+          foreach ($file in @($installer, "$installer.sig", "manifest.json")) {
+            if (!(Test-Path (Join-Path "release" $file)) -or
+                (Get-Item (Join-Path "release" $file)).Length -eq 0) {
+              throw "Release artifact is missing or empty: $file"
+            }
+          }
+
+          $sshDirectory = Join-Path $HOME ".ssh"
+          New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
+          $keyPath = Join-Path $sshDirectory "launcher_deploy"
+          $knownHostsPath = Join-Path $sshDirectory "known_hosts"
+          [System.IO.File]::WriteAllText($keyPath, $env:VDS_SSH_PRIVATE_KEY.Trim() + "`n", [System.Text.UTF8Encoding]::new($false))
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+
+          $remote = "root@$($env:SERVER_IP)"
+          $stage = "$($env:VDS_RELEASE_DIR)/.launcher-deploy-$env:GITHUB_RUN_ID"
+          $sshArgs = @(
+            "-i", $keyPath,
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=$knownHostsPath"
+          )
+          & $ssh.Source @sshArgs $remote "mkdir -p -- '$env:VDS_RELEASE_DIR' '$stage'"
+          if ($LASTEXITCODE -ne 0) { throw "Could not create the VDS staging directory." }
+
+          $scpArgs = @(
+            "-i", $keyPath,
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=$knownHostsPath",
+            (Join-Path "release" $installer),
+            (Join-Path "release" "$installer.sig"),
+            "release/manifest.json",
+            "${remote}:$stage/"
+          )
+          & $scp.Source @scpArgs
+          if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts to the VDS." }
+
+          $remoteScript = @'
+          set -eu
+          release_dir=$1
+          stage_dir=$2
+          version=$3
+          installer="firstmay-launcher-${version}.exe"
+          trap 'rm -rf -- "$stage_dir"' EXIT
+
+          install -m 0644 "$stage_dir/$installer" "$release_dir/.$installer.new"
+          install -m 0644 "$stage_dir/$installer.sig" "$release_dir/.$installer.sig.new"
+          mv -f -- "$release_dir/.$installer.new" "$release_dir/$installer"
+          mv -f -- "$release_dir/.$installer.sig.new" "$release_dir/$installer.sig"
+          install -m 0644 "$stage_dir/manifest.json" "$release_dir/.manifest.json.new"
+          mv -f -- "$release_dir/.manifest.json.new" "$release_dir/manifest.json"
+
+          find "$release_dir" -maxdepth 1 -type f \
+            \( -name 'firstmay-launcher-*.exe' -o -name 'firstmay-launcher-*.exe.sig' \) \
+            ! -name "$installer" ! -name "$installer.sig" -delete
+          '@
+          $remoteScript | & $ssh.Source @sshArgs $remote "sh -s -- '$env:VDS_RELEASE_DIR' '$stage' '$version'"
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish release on the VDS." }
