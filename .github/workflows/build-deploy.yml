@@ -141,12 +141,17 @@ jobs:
     env:
       SERVER_IP: ${{ secrets.SERVER_IP }}
       VDS_RELEASE_DIR: ${{ secrets.VDS_RELEASE_DIR }}
-      VDS_SSH_PRIVATE_KEY: ${{ secrets.VDS_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: launcher-release
           path: release
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VDS_SSH_PRIVATE_KEY }}
+          log-public-key: false
 
       - name: Add server to known hosts
         shell: pwsh
@@ -172,8 +177,7 @@ jobs:
         run: |
           $required = @(
             "SERVER_IP",
-            "VDS_RELEASE_DIR",
-            "VDS_SSH_PRIVATE_KEY"
+            "VDS_RELEASE_DIR"
           )
           foreach ($name in $required) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
@@ -205,17 +209,11 @@ jobs:
           }
 
           $sshDirectory = Join-Path $HOME ".ssh"
-          New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
-          $keyPath = Join-Path $sshDirectory "launcher_deploy"
           $knownHostsPath = Join-Path $sshDirectory "known_hosts"
-          [System.IO.File]::WriteAllText($keyPath, $env:VDS_SSH_PRIVATE_KEY.Trim() + "`n", [System.Text.UTF8Encoding]::new($false))
-          icacls $keyPath /inheritance:r | Out-Null
-          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
 
           $remote = "root@$($env:SERVER_IP)"
           $stage = "$($env:VDS_RELEASE_DIR)/.launcher-deploy-$env:GITHUB_RUN_ID"
           $sshArgs = @(
-            "-i", $keyPath,
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "UserKnownHostsFile=$knownHostsPath"
@@ -224,7 +222,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not create the VDS staging directory." }
 
           $scpArgs = @(
-            "-i", $keyPath,
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "UserKnownHostsFile=$knownHostsPath",
