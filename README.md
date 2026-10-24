@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.264`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The launcher release is `1.0.4`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.2.0`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -55,14 +55,24 @@ The rename step is needed because Tauri's NSIS bundler names the installer
 from the product name, version, architecture, and setup suffix; Cargo does
 not configure the NSIS bundle filename.
 
-Run `pnpm run build:release` to build the installer and its Tauri updater
-signature, then generate a Tauri-compatible `manifest.json` beside them. The
-release base URL is read from `LAUNCHER_RELEASE_BASE_URL` in the local root
-`.env`. The signing key is read from `%USERPROFILE%\.tauri\1stmay-launcher.key`
-unless `TAURI_SIGNING_PRIVATE_KEY_PATH` is set. Keep the private key out of the
-repository and back it up securely. HTTPS is recommended before enabling
-automatic updates because HTTP allows third parties to block update checks or
-replace the manifest, even though the signed update artifact itself is verified.
+The launcher checks for updates at startup and every six hours in the
+background. It downloads a newer signed installer into the `1stMay-updates`
+folder beside the installed launcher. The UI then shows the available version
+and an **Обновить** button; clicking it asks Tauri to verify and install the
+cached package. Windows restarts the launcher after installation. On the next
+startup, the launcher removes its cached installer and metadata; it only deletes
+its own named files and leaves other files untouched. `pnpm run build:release`
+produces the NSIS installer, its Tauri updater signature, and a compatible
+`manifest.json`. With `createUpdaterArtifacts: true`, Tauri signs the installer
+itself; the manifest URL and signature therefore correspond to the `.exe`, not
+an `.nsis.zip` archive. The updater endpoint is
+`<LAUNCHER_RELEASE_BASE_URL>/manifest.json`; the current base is configured in
+the local `.env` and GitHub Actions secret. The signing key is read from
+`%USERPROFILE%\.tauri\1stmay-launcher.key` unless
+`TAURI_SIGNING_PRIVATE_KEY_PATH` is set. Keep the private key outside the
+repository and back it up securely. Versions before `1.1.0` predate the
+in-app updater and need one manual installation of an updater-enabled release.
+Subsequent releases can update through the launcher.
 
 ## GitHub Actions release deployment
 

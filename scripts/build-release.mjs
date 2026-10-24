@@ -89,23 +89,14 @@ renameSync(
   installerSignaturePath,
 );
 
-for (const staleArchiveName of [
-  `${packageInfo.name}-${packageInfo.version}.nsis.zip`,
-  `${tauriConfig.productName}_${packageInfo.version}_x64-setup.nsis.zip`,
-]) {
-  const staleArchivePath = path.join(bundleDirectory, staleArchiveName);
-  rmSync(staleArchivePath, { force: true });
-  rmSync(`${staleArchivePath}.sig`, { force: true });
-}
-
 const signature = readFileSync(installerSignaturePath, "utf8").trim();
 if (!signature) {
-  throw new Error("Tauri создал пустую подпись updater-архива.");
+  throw new Error("Tauri создал пустую подпись установщика для updater.");
 }
 
 const manifest = {
   version: packageInfo.version,
-  notes: "",
+  notes: `1stMay Launcher ${packageInfo.version}`,
   pub_date: new Date().toISOString(),
   url: `${releaseBaseUrl}/${installerName}`,
   signature,
@@ -147,7 +138,7 @@ function readEnvValue(name) {
 
 function validateUrl(name, value) {
   const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`${name} должен быть HTTP(S) URL.`);
+  if (url.protocol !== "https:") {
+    throw new Error(`${name} должен использовать HTTPS.`);
   }
 }

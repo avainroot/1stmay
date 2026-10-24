@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -38,6 +38,17 @@ interface ProgressEvent {
 interface GameStateEvent {
   running: boolean;
   message: string;
+}
+
+interface UpdateProgressEvent {
+  phase: string;
+  version: string;
+  downloaded: number;
+  total: number | null;
+}
+
+interface AvailableUpdate {
+  version: string;
 }
 
 function ParticleBackdrop() {
@@ -133,6 +144,13 @@ function hideServerAddress(value: string) {
 }
 
 export default function App() {
+  const [availableUpdate, setAvailableUpdate] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState(
+    import.meta.env.PROD
+      ? "Обновления не проверены"
+      : "Обновления доступны в release-сборке",
+  );
+  const [updateInstalling, setUpdateInstalling] = useState(false);
   const launcherState = useLauncherStore((state) => state.launcherState);
   const nickname = useLauncherStore((state) => state.nickname);
   const busy = useLauncherStore((state) => state.busy);
@@ -149,6 +167,58 @@ export default function App() {
   const setProgress = useLauncherStore((state) => state.setProgress);
   const setError = useLauncherStore((state) => state.setError);
   const addLog = useLauncherStore((state) => state.addLog);
+
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+
+    let mounted = true;
+    let checking = false;
+    const checkForUpdates = async () => {
+      if (checking) return;
+      checking = true;
+      setUpdateStatus("Проверка обновлений…");
+      try {
+        const update = await invoke<AvailableUpdate | null>("check_and_download_update");
+        if (!mounted) return;
+        if (update) {
+          setAvailableUpdate(update.version);
+          setUpdateStatus(`Доступна новая версия ${update.version}`);
+        } else {
+          setAvailableUpdate(null);
+          setUpdateStatus("Обновлений нет");
+        }
+      } catch (reason) {
+        if (!mounted) return;
+        const message = formatError(reason);
+        setUpdateStatus(`Не удалось проверить обновления: ${message}`);
+        addLog(`Проверка обновлений: ${message}`);
+      } finally {
+        checking = false;
+      }
+    };
+    let disposeProgress: (() => void) | undefined;
+    void listen<UpdateProgressEvent>("launcher-update-progress", ({ payload }) => {
+      if (!mounted || payload.phase !== "downloading") return;
+      const percent = payload.total
+        ? Math.min(100, Math.floor((payload.downloaded / payload.total) * 100))
+        : null;
+      setUpdateStatus(
+        percent === null
+          ? `Загрузка обновления ${payload.version}…`
+          : `Загрузка обновления: ${percent}%`,
+      );
+    }).then((dispose) => {
+      if (mounted) disposeProgress = dispose;
+      else dispose();
+      void checkForUpdates();
+    });
+    const interval = window.setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+      disposeProgress?.();
+    };
+  }, [addLog]);
 
   useEffect(() => {
     let mounted = true;
@@ -265,6 +335,20 @@ export default function App() {
     }
   }
 
+  async function updateLauncher() {
+    setUpdateInstalling(true);
+    setUpdateStatus("Установка обновления и перезапуск…");
+    try {
+      await invoke("install_downloaded_update");
+    } catch (reason) {
+      const message = formatError(reason);
+      setUpdateStatus(`Ошибка обновления: ${message}`);
+      addLog(`Не удалось установить обновление: ${message}`);
+    } finally {
+      setUpdateInstalling(false);
+    }
+  }
+
   const isInstalled = launcherState?.installed ?? false;
 
   return (
@@ -299,7 +383,35 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {import.meta.env.PROD && (
+                <div className="flex max-w-56 flex-col items-end">
+                  {(availableUpdate || updateInstalling) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[9px]"
+                      onClick={() => void updateLauncher()}
+                      disabled={busy || gameRunning || updateInstalling}
+                      title={updateStatus}
+                      aria-label={`Установить обновление ${availableUpdate ?? ""}`}
+                    >
+                      {updateInstalling ? (
+                        <LoaderCircle size={12} className="animate-spin" />
+                      ) : (
+                        <ArrowDownToLine size={12} />
+                      )}
+                      {updateInstalling ? "Установка…" : "Обновить"}
+                    </Button>
+                  )}
+                  <span
+                    className="max-w-full truncate text-[8px] text-[#806d57]"
+                    aria-live="polite"
+                  >
+                    {updateStatus}
+                  </span>
+                </div>
+              )}
               <div className="hidden items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
                 <LockKeyhole size={13} className="text-lime-400/70" />
                 local profile
@@ -389,7 +501,7 @@ export default function App() {
                     placeholder="Введите игровой ник"
                     value={nickname}
                     onChange={(event) => setNickname(event.target.value)}
-                    disabled={busy}
+                    disabled={busy || updateInstalling}
                     aria-label="Никнейм Minecraft"
                   />
                 )}
@@ -410,7 +522,7 @@ export default function App() {
                         size="sm"
                         className="h-7"
                         onClick={() => void chooseDirectory()}
-                        disabled={busy || !launcherState}
+                        disabled={busy || updateInstalling || !launcherState}
                         title="Выбрать папку"
                       >
                         <FolderOpen size={13} />
@@ -444,7 +556,7 @@ export default function App() {
                   <Button
                     size="play"
                     onClick={() => void play()}
-                    disabled={busy || gameRunning || !launcherState}
+                    disabled={busy || updateInstalling || gameRunning || !launcherState}
                   >
                     {busy ? (
                       <LoaderCircle size={16} className="animate-spin" />
