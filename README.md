@@ -67,14 +67,12 @@ replace the manifest, even though the signed update artifact itself is verified.
 ## GitHub Actions release deployment
 
 `.github/workflows/build-deploy.yml` runs formatting, frontend build, and Rust
-tests on pushes to `main`, and uses Windows runners for verification, release
-packaging, and deployment. Configure the required repository Actions secrets
-before pushing to `main` or starting the workflow manually. Their descriptions
-and setup examples are kept in the ignored local `AGENTS.md`, not in this
-README. The workflow builds the signed Windows NSIS installer, creates the
-updater manifest, uploads the installer and signature to a temporary directory
-on the VDS, replaces the active files, then atomically publishes the manifest
-and removes older launcher versions.
+tests and builds the signed Windows NSIS release in one Windows job. A dependent
+Ubuntu job syncs the installer and signature to the VDS with `rsync`, then
+publishes the manifest atomically and removes older launcher versions. Configure
+the required repository Actions secrets before pushing to `main` or starting
+the workflow manually. Their descriptions and setup examples are kept in the
+ignored local `AGENTS.md`, not in this README.
 
 The workflow caches pnpm dependencies, Cargo dependencies/build outputs, and
 the NSIS installation between runs. It writes build configuration only to the

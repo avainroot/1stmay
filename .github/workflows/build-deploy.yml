@@ -14,52 +14,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
+  build-release:
     runs-on: windows-latest
     env:
       QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS || 'remote.example:25565' }}
       MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL || 'https://remote.example/mods.json' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12.4.2
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Create CI-only build configuration
-        shell: pwsh
-        run: |
-          $lines = @(
-            "QUICK_PLAY_SERVER_ADDRESS=$env:QUICK_PLAY_SERVER_ADDRESS",
-            "MOD_MANIFEST_URL=$env:MOD_MANIFEST_URL"
-          )
-          [System.IO.File]::WriteAllLines(
-            (Join-Path $env:GITHUB_WORKSPACE ".env"),
-            $lines,
-            [System.Text.UTF8Encoding]::new($false)
-          )
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-
-  release:
-    needs: verify
-    runs-on: windows-latest
-    env:
-      QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS }}
-      MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL }}
       LAUNCHER_RELEASE_BASE_URL: ${{ secrets.LAUNCHER_RELEASE_BASE_URL }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
@@ -124,6 +83,7 @@ jobs:
           )
 
       - run: pnpm install --frozen-lockfile
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: pnpm run build:release
 
       - uses: actions/upload-artifact@v4
@@ -136,7 +96,7 @@ jobs:
             src-tauri/target/release/bundle/nsis/manifest.json
 
   deploy:
-    needs: [verify, release]
+    needs: build-release
     runs-on: ubuntu-latest
     env:
       SERVER_IP: ${{ secrets.SERVER_IP }}
@@ -168,7 +128,7 @@ jobs:
           printf '%s\n' "$scan_result" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Upload release and atomically publish manifest
+      - name: Sync release artifacts to VDS
         shell: bash
         run: |
           set -euo pipefail
@@ -189,28 +149,21 @@ jobs:
           done
 
           remote="root@$SERVER_IP"
-          stage="${VDS_RELEASE_DIR}/.launcher-deploy-${GITHUB_RUN_ID}"
           ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/known_hosts")
-          ssh "${ssh_args[@]}" "$remote" "mkdir -p -- '$VDS_RELEASE_DIR' '$stage'"
-          scp "${ssh_args[@]}" \
-            "release/$installer" "release/$installer.sig" release/manifest.json \
-            "$remote:$stage/"
+          ssh "${ssh_args[@]}" "$remote" "mkdir -p -- '$VDS_RELEASE_DIR'"
+          rsync -av --checksum -e "ssh ${ssh_args[*]}" \
+            "release/$installer" "release/$installer.sig" \
+            "$remote:$VDS_RELEASE_DIR/"
+          rsync -av --checksum -e "ssh ${ssh_args[*]}" \
+            release/manifest.json "$remote:$VDS_RELEASE_DIR/.manifest.json.new"
 
-          ssh "${ssh_args[@]}" "$remote" sh -s -- "$VDS_RELEASE_DIR" "$stage" "$version" <<'REMOTE'
+          ssh "${ssh_args[@]}" "$remote" sh -s -- "$VDS_RELEASE_DIR" "$version" <<'REMOTE'
           set -eu
           release_dir=$1
-          stage_dir=$2
-          version=$3
+          version=$2
           installer="1stmay-launcher-${version}.exe"
-          trap 'rm -rf -- "$stage_dir"' EXIT
 
-          install -m 0644 "$stage_dir/$installer" "$release_dir/.$installer.new"
-          install -m 0644 "$stage_dir/$installer.sig" "$release_dir/.$installer.sig.new"
-          mv -f -- "$release_dir/.$installer.new" "$release_dir/$installer"
-          mv -f -- "$release_dir/.$installer.sig.new" "$release_dir/$installer.sig"
-          install -m 0644 "$stage_dir/manifest.json" "$release_dir/.manifest.json.new"
           mv -f -- "$release_dir/.manifest.json.new" "$release_dir/manifest.json"
-
           find "$release_dir" -maxdepth 1 -type f \
             \( -name '1stmay-launcher-*.exe' -o -name '1stmay-launcher-*.exe.sig' \) \
             ! -name "$installer" ! -name "$installer.sig" -delete
