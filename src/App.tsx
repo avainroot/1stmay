@@ -159,6 +159,7 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState("Обновления не проверены");
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const updateCheckingRef = useRef(false);
+  const lastUpdateProgressRef = useRef(-10);
   const launcherState = useLauncherStore((state) => state.launcherState);
   const nickname = useLauncherStore((state) => state.nickname);
   const busy = useLauncherStore((state) => state.busy);
@@ -179,10 +180,12 @@ export default function App() {
   const checkForUpdates = useCallback(async () => {
     if (updateCheckingRef.current) return;
     updateCheckingRef.current = true;
+    lastUpdateProgressRef.current = -10;
     setUpdateChecking(true);
     setUpdateDownloading(false);
     setUpdateVisualState("checking");
     setUpdateStatus("Проверка обновлений…");
+    addLog("Проверка обновлений: запрашиваю манифест…");
 
     try {
       const update = await invoke<AvailableUpdate | null>("check_and_download_update");
@@ -190,16 +193,18 @@ export default function App() {
         setAvailableUpdate(update.version);
         setUpdateVisualState("available");
         setUpdateStatus(`Доступна новая версия ${update.version}`);
+        addLog(`Обновление ${update.version} скачано и проверено; готово к установке.`);
       } else {
         setAvailableUpdate(null);
         setUpdateVisualState("current");
         setUpdateStatus("Обновлений нет");
+        addLog("Проверка обновлений завершена: установлена актуальная версия.");
       }
     } catch (reason) {
       const message = formatError(reason);
       setUpdateVisualState("error");
       setUpdateStatus(`Не удалось проверить обновления: ${message}`);
-      addLog(`Проверка обновлений: ${message}`);
+      addLog(`Ошибка проверки или загрузки обновления: ${message}`);
     } finally {
       updateCheckingRef.current = false;
       setUpdateChecking(false);
@@ -211,7 +216,12 @@ export default function App() {
     let mounted = true;
     let disposeProgress: (() => void) | undefined;
     void listen<UpdateProgressEvent>("launcher-update-progress", ({ payload }) => {
-      if (!mounted || payload.phase !== "downloading") return;
+      if (!mounted) return;
+      if (payload.phase === "available") {
+        addLog(`Найдена версия ${payload.version}; проверяю локальный пакет обновления.`);
+        return;
+      }
+      if (payload.phase !== "downloading") return;
       const percent = payload.total
         ? Math.min(100, Math.floor((payload.downloaded / payload.total) * 100))
         : null;
@@ -223,6 +233,10 @@ export default function App() {
           ? `Загрузка обновления ${payload.version}…`
           : `Загрузка обновления: ${percent}%`,
       );
+      if (percent !== null && percent >= lastUpdateProgressRef.current + 10) {
+        lastUpdateProgressRef.current = Math.floor(percent / 10) * 10;
+        addLog(`Скачивание обновления ${payload.version}: ${percent}%.`);
+      }
     }).then((dispose) => {
       if (mounted) disposeProgress = dispose;
       else dispose();
@@ -234,7 +248,7 @@ export default function App() {
       window.clearInterval(interval);
       disposeProgress?.();
     };
-  }, [checkForUpdates]);
+  }, [addLog, checkForUpdates]);
 
   useEffect(() => {
     let mounted = true;
@@ -355,6 +369,7 @@ export default function App() {
     setUpdateInstalling(true);
     setUpdateVisualState("installing");
     setUpdateStatus("Установка обновления и перезапуск…");
+    addLog(`Запуск установки обновления ${availableUpdate ?? ""}.`.trim());
     try {
       await invoke("install_downloaded_update");
     } catch (reason) {
@@ -386,8 +401,8 @@ export default function App() {
       <ParticleBackdrop />
 
       <ScrollArea className="relative z-10 mx-auto w-full max-w-6xl flex-1">
-        <div className="flex min-h-full flex-col gap-3 p-4 sm:p-5">
-          <header className="flex min-h-12 items-center justify-between gap-4 border-b border-[#49392a]/80 pb-3">
+        <div className="flex min-h-full flex-col gap-2 p-3 sm:p-4">
+          <header className="flex min-h-10 items-center justify-between gap-4 border-b border-[#49392a]/80 pb-2">
             <div className="flex items-center gap-3">
               <div className="flex size-9 items-center justify-center rounded-md border border-lime-400/30 bg-lime-400/[0.08] text-lime-200">
                 <MinecraftDiamond size={22} className="[image-rendering:pixelated]" />
@@ -537,10 +552,10 @@ export default function App() {
             </div>
           </section>
 
-          <div className="grid min-h-max flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] grid-rows-[auto_auto] gap-3">
+          <div className="grid min-h-max flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] grid-rows-[auto_auto] gap-2">
             <Card className="flex min-h-0 flex-col overflow-hidden">
-              <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
-                <CardHeader className="mb-5">
+              <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
+                <CardHeader className="mb-3">
                   <CardTitle className="flex items-center gap-2 leading-none">
                     <UserRound size={14} className="text-lime-300" />
                     Профиль игрока
@@ -583,7 +598,7 @@ export default function App() {
                 </p>
 
                 {!isInstalled && (
-                  <div className="mt-5 border-t border-[#49392a]/80 pt-4">
+                  <div className="mt-3 border-t border-[#49392a]/80 pt-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <label className="text-[9px] uppercase tracking-[0.16em] text-[#9a8872]">
                         Каталог установки
@@ -611,7 +626,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="mt-auto pt-5">
+                <div className="mt-auto pt-3">
                   {busy && (
                     <div className="mb-3">
                       <div className="mb-2 flex items-center justify-between gap-3 text-[9px] uppercase tracking-wider text-lime-200/90">
@@ -627,7 +642,14 @@ export default function App() {
                   <Button
                     size="play"
                     onClick={() => void play()}
-                    disabled={busy || updateInstalling || gameRunning || !launcherState}
+                    disabled={
+                      busy ||
+                      updateChecking ||
+                      updateDownloading ||
+                      updateInstalling ||
+                      gameRunning ||
+                      !launcherState
+                    }
                   >
                     {busy ? (
                       <LoaderCircle size={16} className="animate-spin" />
@@ -646,9 +668,9 @@ export default function App() {
               </CardContent>
             </Card>
 
-            <Card className="flex flex-col">
-              <CardContent className="flex flex-1 flex-col p-4 sm:p-5">
-                <CardHeader className="mb-5">
+            <Card className="flex min-h-max flex-col">
+              <CardContent className="flex flex-1 flex-col p-3 sm:p-4">
+                <CardHeader className="mb-3">
                   <CardTitle className="flex items-center gap-2">
                     <Cpu size={14} className="text-lime-300" />
                     Состояние системы
@@ -658,8 +680,8 @@ export default function App() {
                   </span>
                 </CardHeader>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-1">
                     <span className="flex items-center gap-2 text-[10px] leading-none text-[#9a8872]">
                       <Gamepad2 size={13} />
                       Игровой клиент
@@ -672,7 +694,7 @@ export default function App() {
                       {gameRunning ? "АКТИВЕН" : "НЕ ЗАПУЩЕН"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-2">
+                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-1">
                     <span className="flex items-center gap-2 text-[10px] leading-none text-[#9a8872]">
                       <Activity size={13} />
                       Загрузчик
@@ -690,7 +712,7 @@ export default function App() {
                             : "НЕ УСТАНОВЛЕН"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-2">
+                  <div className="flex items-center justify-between border-b border-[#49392a]/70 pb-1">
                     <span className="flex items-center gap-2 text-[10px] leading-none text-[#9a8872]">
                       <ArrowDownToLine size={13} />
                       Управляемые моды
@@ -719,8 +741,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-md border border-[#49392a]/80 bg-black/20 p-2.5">
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-[#49392a]/80 bg-black/20 p-2">
                     <div className="mb-1.5 flex items-center gap-1.5 text-[9px] uppercase tracking-wider text-[#9a8872]">
                       <MemoryStick size={12} className="text-lime-300/80" />
                       ОЗУ системы
@@ -729,7 +751,7 @@ export default function App() {
                       {memoryStatus ? formatMemory(memoryStatus.totalMib) : "—"}
                     </p>
                   </div>
-                  <div className="rounded-md border border-lime-700/40 bg-lime-950/20 p-2.5">
+                  <div className="rounded-md border border-lime-700/40 bg-lime-950/20 p-2">
                     <div className="mb-1.5 flex items-center gap-1.5 text-[9px] uppercase tracking-wider text-[#9a8872]">
                       <Cpu size={12} className="text-lime-300/80" />
                       Лимит heap Java
@@ -749,8 +771,8 @@ export default function App() {
                   </p>
                 )}
 
-                <div className="mt-3 rounded-md border border-[#49392a]/80 bg-black/20 p-2.5">
-                  <div className="mb-2 flex items-center gap-2 text-[9px] uppercase tracking-[0.15em] text-[#9a8872]">
+                <div className="mt-2 rounded-md border border-[#49392a]/80 bg-black/20 p-2">
+                  <div className="mb-1 flex items-center gap-2 text-[9px] uppercase tracking-[0.15em] text-[#9a8872]">
                     <HardDriveIcon />
                     Рабочий каталог
                   </div>
@@ -767,7 +789,7 @@ export default function App() {
             </Card>
 
             <Card className="col-span-2 min-h-0 overflow-hidden">
-              <CardContent className="px-4 pb-2 pt-3">
+              <CardContent className="px-3 pb-2 pt-2">
                 <CardHeader className="mb-1">
                   <CardTitle className="flex items-center gap-2 text-[9px]">
                     <Terminal size={13} className="text-lime-300/80" />
@@ -776,17 +798,17 @@ export default function App() {
                   <span className="text-[9px] text-[#66513a]">SESSION / REMOTE</span>
                 </CardHeader>
                 <div
-                  className="space-y-0.5 overflow-hidden font-mono text-[9px] leading-relaxed sm:text-[10px]"
+                  className="flex h-[76px] flex-col justify-end space-y-0.5 overflow-hidden font-mono text-[9px] leading-3 sm:text-[10px]"
                   aria-live="polite"
                 >
-                  {logs.slice(-4).map((line, index) => (
+                  {logs.slice(-6).map((line, index) => (
                     <p
                       key={`${index}-${line}`}
                       className={
                         line.includes("ERROR")
                           ? "max-h-10 overflow-hidden whitespace-normal break-all text-rose-300"
                           : `truncate ${
-                              index === logs.slice(-4).length - 1
+                              index === logs.slice(-6).length - 1
                                 ? "text-lime-100/90"
                                 : "text-[#806d57]"
                             }`

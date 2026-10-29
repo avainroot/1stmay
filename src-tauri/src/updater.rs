@@ -61,6 +61,15 @@ pub async fn check_and_download_update(app: AppHandle) -> Result<Option<Availabl
         clear_update_files(&update_dir)?;
         return Ok(None);
     };
+    let _ = app.emit(
+        "launcher-update-progress",
+        UpdateProgress {
+            phase: "available",
+            version: update.version.clone(),
+            downloaded: 0,
+            total: None,
+        },
+    );
     if update.download_url.scheme() != "https" {
         return Err("Сервер обновлений должен предоставлять файлы по HTTPS".into());
     }
