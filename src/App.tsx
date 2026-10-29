@@ -552,7 +552,7 @@ export default function App() {
             </div>
           </section>
 
-          <div className="grid min-h-max flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] grid-rows-[auto_auto] gap-2">
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] grid-rows-[minmax(max-content,1fr)_112px] gap-2">
             <Card className="flex min-h-0 flex-col overflow-hidden">
               <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
                 <CardHeader className="mb-3">
@@ -788,7 +788,7 @@ export default function App() {
               </CardContent>
             </Card>
 
-            <Card className="col-span-2 min-h-0 overflow-hidden">
+            <Card className="col-span-2 h-[112px] max-h-[112px] self-start overflow-hidden">
               <CardContent className="px-3 pb-2 pt-2">
                 <CardHeader className="mb-1">
                   <CardTitle className="flex items-center gap-2 text-[9px]">
