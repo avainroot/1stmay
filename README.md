@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.264`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.2.4`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.2.5`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -29,13 +29,20 @@ The offline UUID implementation is tested against the Java
 `UUID.nameUUIDFromBytes` fixture for `Notch`. The install, launch and mod-sync
 code has unit coverage.
 
-Set `QUICK_PLAY_SERVER_ADDRESS` and `MOD_MANIFEST_URL` in a local root `.env`
-file before building. Start from `.env.example`, replacing its placeholder
-values with the deployment's remote server address and manifest URL. `.env`
+Set `QUICK_PLAY_SERVER_ADDRESS`, `MOD_MANIFEST_URL`, and
+`LAUNCHER_RELEASE_BASE_URL` in a local root `.env` file. Start from
+`.env.example`, replacing its placeholder values with the deployment's remote
+server address, manifest URL, and release base URL. `.env`
 is ignored by version control and the values are embedded into the built
 client. Use HTTPS for the manifest: plain HTTP does not authenticate the
 manifest or its hashes. VDS publication is managed separately from this
 client repository.
+
+Run `pnpm run dev:tauri` to start the desktop app with updater checks enabled.
+The dev runner builds a temporary Tauri config from `LAUNCHER_RELEASE_BASE_URL`
+and the public key in `%USERPROFILE%\\.tauri\\1stmay-launcher.key.pub` (or
+`TAURI_SIGNING_PUBLIC_KEY` if set). The temporary config is removed when the
+dev process exits; neither value is written to tracked files.
 
 ## Checks
 

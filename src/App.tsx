@@ -156,11 +156,7 @@ export default function App() {
   const [updateVisualState, setUpdateVisualState] = useState<UpdateVisualState>("idle");
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState(
-    import.meta.env.PROD
-      ? "Обновления не проверены"
-      : "Обновления доступны в release-сборке",
-  );
+  const [updateStatus, setUpdateStatus] = useState("Обновления не проверены");
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const updateCheckingRef = useRef(false);
   const launcherState = useLauncherStore((state) => state.launcherState);
@@ -212,8 +208,6 @@ export default function App() {
   }, [addLog]);
 
   useEffect(() => {
-    if (!import.meta.env.PROD) return;
-
     let mounted = true;
     let disposeProgress: (() => void) | undefined;
     void listen<UpdateProgressEvent>("launcher-update-progress", ({ payload }) => {
@@ -410,7 +404,7 @@ export default function App() {
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
               <div className="flex items-center gap-2">
                 <span
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-full border bg-[#211a13]/80 ${
+                  className={`grid size-9 shrink-0 place-items-center rounded-full border bg-[#211a13]/80 ${
                     updateVisualState === "current"
                       ? "border-emerald-400/30 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.1)]"
                       : updateVisualState === "error"
