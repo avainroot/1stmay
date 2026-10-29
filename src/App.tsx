@@ -147,6 +147,7 @@ function hideServerAddress(value: string) {
 export default function App() {
   const [availableUpdate, setAvailableUpdate] = useState<string | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateStatus, setUpdateStatus] = useState(
     import.meta.env.PROD
       ? "Обновления не проверены"
@@ -181,6 +182,7 @@ export default function App() {
     updateCheckingRef.current = true;
     setUpdateChecking(true);
     setUpdateStatus("Проверка обновлений…");
+    setUpdateDownloading(false);
     try {
       const update = await invoke<AvailableUpdate | null>("check_and_download_update");
       if (update) {
@@ -197,6 +199,7 @@ export default function App() {
     } finally {
       updateCheckingRef.current = false;
       setUpdateChecking(false);
+      setUpdateDownloading(false);
     }
   }, [addLog]);
 
@@ -210,6 +213,7 @@ export default function App() {
       const percent = payload.total
         ? Math.min(100, Math.floor((payload.downloaded / payload.total) * 100))
         : null;
+      setUpdateDownloading(true);
       setUpdateStatus(
         percent === null
           ? `Загрузка обновления ${payload.version}…`
@@ -392,7 +396,28 @@ export default function App() {
               </div>
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
-              <div className="flex min-w-0 flex-col items-end gap-1">
+              <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                {availableUpdate && !updateInstalling && (
+                  <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+                    <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,242,100,0.65)]" />
+                    Доступно {availableUpdate}
+                  </span>
+                )}
+                {updateStatus.startsWith("Обновлений нет") && (
+                  <span className="inline-flex h-7 items-center rounded-full border border-[#66513a]/70 bg-[#211a13]/60 px-2.5 text-[8px] font-medium uppercase tracking-[0.1em] text-[#b3a58f]">
+                    Версия актуальна
+                  </span>
+                )}
+                {(updateStatus.startsWith("Не удалось проверить") ||
+                  updateStatus.startsWith("Ошибка обновления")) && (
+                  <span
+                    className="inline-flex h-7 max-w-36 items-center truncate rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-2.5 text-[8px] font-medium tracking-wide text-amber-200/80"
+                    title={updateStatus}
+                    role="status"
+                  >
+                    Ошибка обновления
+                  </span>
+                )}
                 <div className="flex items-center gap-2">
                   {availableUpdate && (
                     <Button
@@ -415,28 +440,32 @@ export default function App() {
                   <Button
                     variant="primary"
                     size="sm"
-                    className="h-8 px-3 text-[9px] leading-none tracking-[0.08em]"
+                    className="h-9 rounded-lg px-3.5 text-[10px] leading-none tracking-[0.08em] shadow-[0_4px_18px_rgba(108,195,73,0.13)]"
                     onClick={() => void checkForUpdates()}
-                    disabled={busy || gameRunning || updateInstalling || updateChecking}
-                    title="Проверить наличие обновления"
+                    disabled={
+                      busy ||
+                      gameRunning ||
+                      updateInstalling ||
+                      updateChecking ||
+                      updateDownloading
+                    }
+                    title={updateStatus}
                     aria-label="Проверить наличие обновления"
                   >
-                    {updateChecking ? (
-                      <LoaderCircle size={12} className="animate-spin" />
+                    {updateChecking || updateDownloading ? (
+                      <LoaderCircle size={13} className="animate-spin" />
                     ) : (
                       <RefreshCw size={13} />
                     )}
-                    Проверить
+                    {updateDownloading
+                      ? updateStatus.startsWith("Загрузка обновления:")
+                        ? updateStatus.replace("Загрузка обновления: ", "")
+                        : "Загрузка…"
+                      : updateChecking
+                        ? "Проверяем…"
+                        : "Проверить"}
                   </Button>
                 </div>
-                <span
-                  className={`max-w-44 truncate text-right text-[8px] leading-tight ${
-                    availableUpdate ? "text-lime-300" : "text-[#9a8872]"
-                  }`}
-                  aria-live="polite"
-                >
-                  {updateStatus}
-                </span>
               </div>
               <div className="hidden shrink-0 items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
                 <LockKeyhole size={13} className="text-lime-400/70" />
