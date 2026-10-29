@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.264`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.2.0`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.2.1`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -73,6 +73,10 @@ the local `.env` and GitHub Actions secret. The signing key is read from
 repository and back it up securely. Versions before `1.1.0` predate the
 in-app updater and need one manual installation of an updater-enabled release.
 Subsequent releases can update through the launcher.
+
+The **Проверить обновления** button manually starts the same check and
+background download used at startup. The launcher can then install the downloaded
+release using **Обновить**.
 
 ## GitHub Actions release deployment
 

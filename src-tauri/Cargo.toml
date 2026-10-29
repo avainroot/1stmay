@@ -1,6 +1,6 @@
 [package]
 name = "firstmay-launcher"
-version = "1.2.0"
+version = "1.2.1"
 description = "Minimal 1stMay Minecraft launcher"
 authors = ["1stMay"]
 edition = "2021"

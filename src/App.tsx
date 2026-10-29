@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -16,6 +16,7 @@ import {
   MemoryStick,
   Play,
   Radio,
+  RefreshCw,
   Terminal,
   UserRound,
 } from "lucide-react";
@@ -145,12 +146,14 @@ function hideServerAddress(value: string) {
 
 export default function App() {
   const [availableUpdate, setAvailableUpdate] = useState<string | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
   const [updateStatus, setUpdateStatus] = useState(
     import.meta.env.PROD
       ? "Обновления не проверены"
       : "Обновления доступны в release-сборке",
   );
   const [updateInstalling, setUpdateInstalling] = useState(false);
+  const updateCheckingRef = useRef(false);
   const launcherState = useLauncherStore((state) => state.launcherState);
   const nickname = useLauncherStore((state) => state.nickname);
   const busy = useLauncherStore((state) => state.busy);
@@ -168,34 +171,39 @@ export default function App() {
   const setError = useLauncherStore((state) => state.setError);
   const addLog = useLauncherStore((state) => state.addLog);
 
+  const checkForUpdates = useCallback(async () => {
+    if (!import.meta.env.PROD) {
+      setUpdateStatus("Проверка обновлений доступна в release-версии лаунчера");
+      return;
+    }
+
+    if (updateCheckingRef.current) return;
+    updateCheckingRef.current = true;
+    setUpdateChecking(true);
+    setUpdateStatus("Проверка обновлений…");
+    try {
+      const update = await invoke<AvailableUpdate | null>("check_and_download_update");
+      if (update) {
+        setAvailableUpdate(update.version);
+        setUpdateStatus(`Доступна новая версия ${update.version}`);
+      } else {
+        setAvailableUpdate(null);
+        setUpdateStatus("Обновлений нет");
+      }
+    } catch (reason) {
+      const message = formatError(reason);
+      setUpdateStatus(`Не удалось проверить обновления: ${message}`);
+      addLog(`Проверка обновлений: ${message}`);
+    } finally {
+      updateCheckingRef.current = false;
+      setUpdateChecking(false);
+    }
+  }, [addLog]);
+
   useEffect(() => {
     if (!import.meta.env.PROD) return;
 
     let mounted = true;
-    let checking = false;
-    const checkForUpdates = async () => {
-      if (checking) return;
-      checking = true;
-      setUpdateStatus("Проверка обновлений…");
-      try {
-        const update = await invoke<AvailableUpdate | null>("check_and_download_update");
-        if (!mounted) return;
-        if (update) {
-          setAvailableUpdate(update.version);
-          setUpdateStatus(`Доступна новая версия ${update.version}`);
-        } else {
-          setAvailableUpdate(null);
-          setUpdateStatus("Обновлений нет");
-        }
-      } catch (reason) {
-        if (!mounted) return;
-        const message = formatError(reason);
-        setUpdateStatus(`Не удалось проверить обновления: ${message}`);
-        addLog(`Проверка обновлений: ${message}`);
-      } finally {
-        checking = false;
-      }
-    };
     let disposeProgress: (() => void) | undefined;
     void listen<UpdateProgressEvent>("launcher-update-progress", ({ payload }) => {
       if (!mounted || payload.phase !== "downloading") return;
@@ -218,7 +226,7 @@ export default function App() {
       window.clearInterval(interval);
       disposeProgress?.();
     };
-  }, [addLog]);
+  }, [checkForUpdates]);
 
   useEffect(() => {
     let mounted = true;
@@ -384,9 +392,9 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {import.meta.env.PROD && (
-                <div className="flex max-w-56 flex-col items-end">
-                  {(availableUpdate || updateInstalling) && (
+              <div className="flex max-w-72 flex-col items-end">
+                <div className="flex items-center gap-1">
+                  {availableUpdate && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -394,7 +402,7 @@ export default function App() {
                       onClick={() => void updateLauncher()}
                       disabled={busy || gameRunning || updateInstalling}
                       title={updateStatus}
-                      aria-label={`Установить обновление ${availableUpdate ?? ""}`}
+                      aria-label={`Установить обновление ${availableUpdate}`}
                     >
                       {updateInstalling ? (
                         <LoaderCircle size={12} className="animate-spin" />
@@ -404,14 +412,30 @@ export default function App() {
                       {updateInstalling ? "Установка…" : "Обновить"}
                     </Button>
                   )}
-                  <span
-                    className="max-w-full truncate text-[8px] text-[#806d57]"
-                    aria-live="polite"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[9px]"
+                    onClick={() => void checkForUpdates()}
+                    disabled={busy || gameRunning || updateInstalling || updateChecking}
+                    title="Проверить наличие обновления"
+                    aria-label="Проверить наличие обновления"
                   >
-                    {updateStatus}
-                  </span>
+                    {updateChecking ? (
+                      <LoaderCircle size={12} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    Проверить обновления
+                  </Button>
                 </div>
-              )}
+                <span
+                  className="max-w-full truncate text-[8px] text-[#806d57]"
+                  aria-live="polite"
+                >
+                  {updateStatus}
+                </span>
+              </div>
               <div className="hidden items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
                 <LockKeyhole size={13} className="text-lime-400/70" />
                 local profile
