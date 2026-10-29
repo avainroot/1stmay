@@ -8,12 +8,16 @@ import {
   Activity,
   ArrowDownToLine,
   Check,
+  CircleCheck,
+  CircleX,
   Cpu,
+  Download,
   FolderOpen,
   Gamepad2,
   LoaderCircle,
   LockKeyhole,
   MemoryStick,
+  MonitorDown,
   Play,
   Radio,
   RefreshCw,
@@ -51,6 +55,9 @@ interface UpdateProgressEvent {
 interface AvailableUpdate {
   version: string;
 }
+
+type UpdateVisualState =
+  "idle" | "checking" | "downloading" | "installing" | "current" | "available" | "error";
 
 function ParticleBackdrop() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,6 +153,7 @@ function hideServerAddress(value: string) {
 
 export default function App() {
   const [availableUpdate, setAvailableUpdate] = useState<string | null>(null);
+  const [updateVisualState, setUpdateVisualState] = useState<UpdateVisualState>("idle");
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateStatus, setUpdateStatus] = useState(
@@ -173,27 +181,27 @@ export default function App() {
   const addLog = useLauncherStore((state) => state.addLog);
 
   const checkForUpdates = useCallback(async () => {
-    if (!import.meta.env.PROD) {
-      setUpdateStatus("Проверка обновлений доступна в release-версии лаунчера");
-      return;
-    }
-
     if (updateCheckingRef.current) return;
     updateCheckingRef.current = true;
     setUpdateChecking(true);
-    setUpdateStatus("Проверка обновлений…");
     setUpdateDownloading(false);
+    setUpdateVisualState("checking");
+    setUpdateStatus("Проверка обновлений…");
+
     try {
       const update = await invoke<AvailableUpdate | null>("check_and_download_update");
       if (update) {
         setAvailableUpdate(update.version);
+        setUpdateVisualState("available");
         setUpdateStatus(`Доступна новая версия ${update.version}`);
       } else {
         setAvailableUpdate(null);
+        setUpdateVisualState("current");
         setUpdateStatus("Обновлений нет");
       }
     } catch (reason) {
       const message = formatError(reason);
+      setUpdateVisualState("error");
       setUpdateStatus(`Не удалось проверить обновления: ${message}`);
       addLog(`Проверка обновлений: ${message}`);
     } finally {
@@ -213,7 +221,9 @@ export default function App() {
       const percent = payload.total
         ? Math.min(100, Math.floor((payload.downloaded / payload.total) * 100))
         : null;
+      setUpdateChecking(false);
       setUpdateDownloading(true);
+      setUpdateVisualState("downloading");
       setUpdateStatus(
         percent === null
           ? `Загрузка обновления ${payload.version}…`
@@ -349,11 +359,13 @@ export default function App() {
 
   async function updateLauncher() {
     setUpdateInstalling(true);
+    setUpdateVisualState("installing");
     setUpdateStatus("Установка обновления и перезапуск…");
     try {
       await invoke("install_downloaded_update");
     } catch (reason) {
       const message = formatError(reason);
+      setUpdateVisualState("error");
       setUpdateStatus(`Ошибка обновления: ${message}`);
       addLog(`Не удалось установить обновление: ${message}`);
     } finally {
@@ -396,76 +408,86 @@ export default function App() {
               </div>
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
-              <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-                {availableUpdate && !updateInstalling && (
-                  <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-                    <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,242,100,0.65)]" />
-                    Доступно {availableUpdate}
-                  </span>
-                )}
-                {updateStatus.startsWith("Обновлений нет") && (
-                  <span className="inline-flex h-7 items-center rounded-full border border-[#66513a]/70 bg-[#211a13]/60 px-2.5 text-[8px] font-medium uppercase tracking-[0.1em] text-[#b3a58f]">
-                    Версия актуальна
-                  </span>
-                )}
-                {(updateStatus.startsWith("Не удалось проверить") ||
-                  updateStatus.startsWith("Ошибка обновления")) && (
-                  <span
-                    className="inline-flex h-7 max-w-36 items-center truncate rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-2.5 text-[8px] font-medium tracking-wide text-amber-200/80"
-                    title={updateStatus}
-                    role="status"
-                  >
-                    Ошибка обновления
-                  </span>
-                )}
-                <div className="flex items-center gap-2">
-                  {availableUpdate && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-[9px] leading-none"
-                      onClick={() => void updateLauncher()}
-                      disabled={busy || gameRunning || updateInstalling}
-                      title={updateStatus}
-                      aria-label={`Установить обновление ${availableUpdate}`}
-                    >
-                      {updateInstalling ? (
-                        <LoaderCircle size={12} className="animate-spin" />
-                      ) : (
-                        <ArrowDownToLine size={12} />
-                      )}
-                      {updateInstalling ? "Установка…" : "Обновить"}
-                    </Button>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex size-9 shrink-0 items-center justify-center rounded-full border bg-[#211a13]/80 ${
+                    updateVisualState === "current"
+                      ? "border-emerald-400/30 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.1)]"
+                      : updateVisualState === "error"
+                        ? "border-red-400/30 text-red-400 shadow-[0_0_14px_rgba(248,113,113,0.1)]"
+                        : updateVisualState === "available"
+                          ? "border-lime-300/30 text-lime-300"
+                          : updateVisualState === "downloading" ||
+                              updateVisualState === "installing"
+                            ? "border-lime-300/30 text-lime-300"
+                            : "border-[#66513a]/70 text-[#a6957e]"
+                  }`}
+                  title={updateStatus}
+                  role="status"
+                  aria-label={updateStatus}
+                >
+                  {updateVisualState === "current" ? (
+                    <CircleCheck size={17} />
+                  ) : updateVisualState === "error" ? (
+                    <CircleX size={17} />
+                  ) : updateVisualState === "checking" ? (
+                    <LoaderCircle size={16} className="animate-spin" />
+                  ) : updateVisualState === "downloading" ? (
+                    <Download size={16} className="animate-bounce" />
+                  ) : updateVisualState === "installing" ? (
+                    <MonitorDown size={16} className="animate-pulse" />
+                  ) : updateVisualState === "available" ? (
+                    <ArrowDownToLine size={16} />
+                  ) : (
+                    <RefreshCw size={15} />
                   )}
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="h-9 rounded-lg px-3.5 text-[10px] leading-none tracking-[0.08em] shadow-[0_4px_18px_rgba(108,195,73,0.13)]"
-                    onClick={() => void checkForUpdates()}
-                    disabled={
-                      busy ||
-                      gameRunning ||
-                      updateInstalling ||
-                      updateChecking ||
-                      updateDownloading
-                    }
-                    title={updateStatus}
-                    aria-label="Проверить наличие обновления"
-                  >
-                    {updateChecking || updateDownloading ? (
-                      <LoaderCircle size={13} className="animate-spin" />
-                    ) : (
-                      <RefreshCw size={13} />
-                    )}
-                    {updateDownloading
-                      ? updateStatus.startsWith("Загрузка обновления:")
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="h-9 min-w-28 rounded-lg px-3.5 text-[10px] leading-none tracking-[0.08em] shadow-[0_4px_18px_rgba(108,195,73,0.13)]"
+                  onClick={() =>
+                    void (availableUpdate ? updateLauncher() : checkForUpdates())
+                  }
+                  disabled={
+                    busy ||
+                    gameRunning ||
+                    updateChecking ||
+                    updateDownloading ||
+                    updateInstalling
+                  }
+                  title={updateStatus}
+                  aria-label={
+                    availableUpdate
+                      ? `Установить обновление ${availableUpdate}`
+                      : "Проверить наличие обновления"
+                  }
+                >
+                  {updateInstalling ? (
+                    <>
+                      <MonitorDown size={13} className="animate-pulse" />
+                      Установка…
+                    </>
+                  ) : updateDownloading ? (
+                    <>
+                      <Download size={13} className="animate-bounce" />
+                      {updateStatus.startsWith("Загрузка обновления:")
                         ? updateStatus.replace("Загрузка обновления: ", "")
-                        : "Загрузка…"
-                      : updateChecking
-                        ? "Проверяем…"
-                        : "Проверить"}
-                  </Button>
-                </div>
+                        : "Загрузка…"}
+                    </>
+                  ) : updateChecking ? (
+                    <>
+                      <LoaderCircle size={13} className="animate-spin" />
+                      Проверка…
+                    </>
+                  ) : availableUpdate ? (
+                    "Установить"
+                  ) : updateVisualState === "error" ? (
+                    "Повторить"
+                  ) : (
+                    "Проверить"
+                  )}
+                </Button>
               </div>
               <div className="hidden shrink-0 items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
                 <LockKeyhole size={13} className="text-lime-400/70" />
