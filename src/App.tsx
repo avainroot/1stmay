@@ -377,7 +377,7 @@ export default function App() {
 
       <ScrollArea className="relative z-10 mx-auto w-full max-w-6xl flex-1">
         <div className="flex min-h-full flex-col gap-3 p-4 sm:p-5">
-          <header className="flex min-h-12 items-center justify-between border-b border-[#49392a]/80 pb-3">
+          <header className="flex min-h-12 items-center justify-between gap-4 border-b border-[#49392a]/80 pb-3">
             <div className="flex items-center gap-3">
               <div className="flex size-9 items-center justify-center rounded-md border border-lime-400/30 bg-lime-400/[0.08] text-lime-200">
                 <MinecraftDiamond size={22} className="[image-rendering:pixelated]" />
@@ -391,14 +391,14 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex max-w-72 flex-col items-end">
-                <div className="flex items-center gap-1">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
+              <div className="flex min-w-0 flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
                   {availableUpdate && (
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
-                      className="h-7 px-2 text-[9px]"
+                      className="h-8 px-3 text-[9px] leading-none"
                       onClick={() => void updateLauncher()}
                       disabled={busy || gameRunning || updateInstalling}
                       title={updateStatus}
@@ -413,9 +413,9 @@ export default function App() {
                     </Button>
                   )}
                   <Button
-                    variant="ghost"
+                    variant="primary"
                     size="sm"
-                    className="h-7 px-2 text-[9px]"
+                    className="h-8 px-3 text-[9px] leading-none tracking-[0.08em]"
                     onClick={() => void checkForUpdates()}
                     disabled={busy || gameRunning || updateInstalling || updateChecking}
                     title="Проверить наличие обновления"
@@ -424,24 +424,26 @@ export default function App() {
                     {updateChecking ? (
                       <LoaderCircle size={12} className="animate-spin" />
                     ) : (
-                      <RefreshCw size={12} />
+                      <RefreshCw size={13} />
                     )}
-                    Проверить обновления
+                    Проверить
                   </Button>
                 </div>
                 <span
-                  className="max-w-full truncate text-[8px] text-[#806d57]"
+                  className={`max-w-44 truncate text-right text-[8px] leading-tight ${
+                    availableUpdate ? "text-lime-300" : "text-[#9a8872]"
+                  }`}
                   aria-live="polite"
                 >
                   {updateStatus}
                 </span>
               </div>
-              <div className="hidden items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
+              <div className="hidden shrink-0 items-center gap-2 text-[10px] uppercase tracking-widest text-[#9a8872] sm:flex">
                 <LockKeyhole size={13} className="text-lime-400/70" />
                 local profile
               </div>
               <div
-                className={`inline-flex h-7 items-center justify-center gap-2 rounded-full border px-3 text-[9px] font-semibold uppercase leading-none tracking-[0.16em] ${
+                className={`inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full border px-3 text-[9px] font-semibold uppercase leading-none tracking-[0.16em] ${
                   gameRunning
                     ? "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-300"
                     : "border-[#66513a] bg-[#211a13]/90 text-[#c4b8a5]"
