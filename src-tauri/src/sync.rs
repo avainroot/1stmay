@@ -19,7 +19,7 @@ const MAX_MANAGED_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct RemoteManifest {
-    version: Option<u32>,
+    version: u32,
     files: Vec<RemoteFile>,
 }
 
@@ -266,10 +266,11 @@ where
 fn parse_manifest(bytes: &[u8]) -> Result<Vec<ManifestFile>, String> {
     let remote: RemoteManifest = serde_json::from_slice(bytes)
         .map_err(|error| format!("Манифест файлов повреждён или имеет неверный формат: {error}"))?;
-    if let Some(version) = remote.version {
-        if version != 1 {
-            return Err(format!("Версия манифеста {version} не поддерживается"));
-        }
+    if remote.version != 1 {
+        return Err(format!(
+            "Версия манифеста {} не поддерживается",
+            remote.version
+        ));
     }
     remote
         .files
@@ -853,8 +854,8 @@ mod tests {
     }
 
     #[test]
-    fn accepts_shared_manifest_without_version_field() {
-        assert!(parse_manifest(br#"{"files":[]}"#).is_ok());
+    fn rejects_shared_manifest_without_version_field() {
+        assert!(parse_manifest(br#"{"files":[]}"#).is_err());
     }
 
     #[test]
