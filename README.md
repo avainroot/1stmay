@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.9`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.10`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -56,7 +56,8 @@ manifest or its hashes. VDS publication is managed separately from this
 client repository.
 
 The action console retains up to 100 recent events, wraps long messages, and
-automatically scrolls to the latest entry.
+automatically scrolls to the latest entry. URLs are redacted from console
+messages so configured manifest, updater, and server addresses are not shown.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,

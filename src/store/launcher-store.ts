@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { sanitizeConsoleMessage } from "../lib/sanitize-console-message";
 
 export interface LauncherState {
   nickname: string | null;
@@ -72,25 +73,32 @@ export const useLauncherStore = create<LauncherStore>((set) => ({
   setGameRunning: (gameRunning) => set({ gameRunning }),
   setMemoryStatus: (memoryStatus) => set({ memoryStatus }),
   setProgress: (message) =>
-    set((state) => ({
-      stage: message,
-      progress: progressForMessage(message),
-      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-100),
-    })),
+    set((state) => {
+      const safeMessage = sanitizeConsoleMessage(message);
+      return {
+        stage: safeMessage,
+        progress: progressForMessage(safeMessage),
+        logs: [...state.logs, `[${timestamp()}] ${safeMessage}`].slice(-100),
+      };
+    }),
   setError: (error) =>
-    set((state) =>
-      state.error === error
+    set((state) => {
+      const safeError = sanitizeConsoleMessage(error);
+      return state.error === safeError
         ? state
         : {
-            error,
-            logs: error
-              ? [...state.logs, `[${timestamp()}] ERROR // ${error}`].slice(-100)
+            error: safeError,
+            logs: safeError
+              ? [...state.logs, `[${timestamp()}] ERROR // ${safeError}`].slice(-100)
               : state.logs,
-          },
-    ),
+          };
+    }),
   addLog: (message) =>
-    set((state) => ({
-      stage: message,
-      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-100),
-    })),
+    set((state) => {
+      const safeMessage = sanitizeConsoleMessage(message);
+      return {
+        stage: safeMessage,
+        logs: [...state.logs, `[${timestamp()}] ${safeMessage}`].slice(-100),
+      };
+    }),
 }));
