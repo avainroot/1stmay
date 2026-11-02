@@ -75,7 +75,7 @@ export const useLauncherStore = create<LauncherStore>((set) => ({
     set((state) => ({
       stage: message,
       progress: progressForMessage(message),
-      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-7),
+      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-100),
     })),
   setError: (error) =>
     set((state) =>
@@ -84,13 +84,13 @@ export const useLauncherStore = create<LauncherStore>((set) => ({
         : {
             error,
             logs: error
-              ? [...state.logs, `[${timestamp()}] ERROR // ${error}`].slice(-7)
+              ? [...state.logs, `[${timestamp()}] ERROR // ${error}`].slice(-100)
               : state.logs,
           },
     ),
   addLog: (message) =>
     set((state) => ({
       stage: message,
-      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-7),
+      logs: [...state.logs, `[${timestamp()}] ${message}`].slice(-100),
     })),
 }));

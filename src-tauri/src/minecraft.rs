@@ -104,7 +104,7 @@ async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Resu
         "neoforge-{}-installer.jar",
         config::NEOFORGE_VERSION
     ));
-    ensure_installer(&installer).await?;
+    ensure_installer(app, &installer).await?;
 
     let launcher_profiles = game_dir.join("launcher_profiles.json");
     if !launcher_profiles.exists() {
@@ -144,7 +144,7 @@ async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Resu
     Ok(())
 }
 
-async fn ensure_installer(destination: &Path) -> Result<(), String> {
+async fn ensure_installer(app: &AppHandle, destination: &Path) -> Result<(), String> {
     if destination.is_file() {
         let existing = fs::read(destination)
             .map_err(|error| format!("Не удалось проверить установщик NeoForge: {error}"))?;
@@ -152,12 +152,45 @@ async fn ensure_installer(destination: &Path) -> Result<(), String> {
             return Ok(());
         }
     }
-    let client = metadata::http_client()?;
-    let bytes = metadata::fetch_bytes(&client, config::NEOFORGE_INSTALLER_URL).await?;
+    let official_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("Не удалось создать HTTP-клиент NeoForge: {error}"))?;
+    emit_progress(
+        app,
+        "Загрузка установщика NeoForge с официального источника…",
+    )?;
+    let bytes = match fetch_neoforge_installer(&official_client, config::NEOFORGE_INSTALLER_URL)
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(InstallerDownloadError::Timeout) => {
+            emit_progress(
+                app,
+                "Официальный источник NeoForge отвечает дольше 8 секунд; переключение на резервный источник…",
+            )?;
+            emit_progress(app, "Загрузка установщика NeoForge с резервного источника…")?;
+            let fallback_client = metadata::http_client()?;
+            fetch_neoforge_installer(&fallback_client, config::NEOFORGE_FALLBACK_URL)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Истекло ожидание официального источника NeoForge; резервная загрузка не удалась: {}",
+                        error.message()
+                    )
+                })?
+        }
+        Err(InstallerDownloadError::Failed(error)) => {
+            return Err(format!(
+                "Не удалось скачать официальный установщик NeoForge: {error}"
+            ))
+        }
+    };
     let actual = sha256(&bytes);
     if actual != config::NEOFORGE_INSTALLER_SHA256 {
         return Err(format!(
-            "SHA-256 официального установщика NeoForge не совпал: ожидалось {}, получено {actual}",
+            "SHA-256 загруженного установщика NeoForge не совпал: ожидалось {}, получено {actual}",
             config::NEOFORGE_INSTALLER_SHA256
         ));
     }
@@ -165,8 +198,80 @@ async fn ensure_installer(destination: &Path) -> Result<(), String> {
         .map_err(|error| format!("Не удалось сохранить установщик NeoForge: {error}"))
 }
 
+enum InstallerDownloadError {
+    Timeout,
+    Failed(String),
+}
+
+impl InstallerDownloadError {
+    fn message(self) -> String {
+        match self {
+            Self::Timeout => "превышено время ожидания".into(),
+            Self::Failed(message) => message,
+        }
+    }
+}
+
+async fn fetch_neoforge_installer(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<u8>, InstallerDownloadError> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|error| InstallerDownloadError::Failed(format!("неверный URL: {error}")))?;
+    if parsed.scheme() != "https" {
+        return Err(InstallerDownloadError::Failed(
+            "URL установщика должен использовать HTTPS".into(),
+        ));
+    }
+    let response = client.get(parsed).send().await.map_err(|error| {
+        if error.is_timeout() {
+            InstallerDownloadError::Timeout
+        } else {
+            InstallerDownloadError::Failed(error.to_string())
+        }
+    })?;
+    if response.url().scheme() != "https" {
+        return Err(InstallerDownloadError::Failed(
+            "Загрузка была перенаправлена на незашифрованный URL".into(),
+        ));
+    }
+    let response = response.error_for_status().map_err(|error| {
+        if error.is_timeout() {
+            InstallerDownloadError::Timeout
+        } else {
+            InstallerDownloadError::Failed(error.to_string())
+        }
+    })?;
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| {
+            if error.is_timeout() {
+                InstallerDownloadError::Timeout
+            } else {
+                InstallerDownloadError::Failed(error.to_string())
+            }
+        })
+}
+
 fn sha256(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fetch_neoforge_installer, InstallerDownloadError};
+
+    #[tokio::test]
+    async fn rejects_non_https_neoforge_sources_before_requesting_them() {
+        let client = reqwest::Client::new();
+        let error = fetch_neoforge_installer(&client, "http://localhost/installer.jar")
+            .await
+            .unwrap_err();
+        assert!(matches!(&error, InstallerDownloadError::Failed(_)));
+        assert!(error.message().contains("HTTPS"));
+    }
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {

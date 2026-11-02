@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.5`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.6`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -29,17 +29,24 @@ The offline UUID implementation is tested against the Java
 `UUID.nameUUIDFromBytes` fixture for `Notch`. The install, launch and mod-sync
 code has unit coverage.
 
-Set `QUICK_PLAY_SERVER_ADDRESS`, `MOD_MANIFEST_URL`, and
+Set `QUICK_PLAY_SERVER_ADDRESS`, `MOD_MANIFEST_URL`, `NEOFORGE_URL`, and
 `LAUNCHER_RELEASE_BASE_URL` in a local root `.env` file. Start from
 `.env.example`, replacing its placeholder values with the deployment's remote
 server address, shared file manifest URL (for example
-`https://mc.rootflow.ru/manifest.json`), and release base URL. The manifest uses
+`https://mc.rootflow.ru/manifest.json`), fallback NeoForge installer URL, and
+release base URL. If the official NeoForge installer download times out after
+8 seconds, the launcher retries it through `NEOFORGE_URL`; both sources are
+verified against the pinned installer SHA-256. Set `NEOFORGE_URL` as a
+GitHub Actions secret for release builds. The manifest uses
 schema version `1` with a top-level `files` array and entries containing
 `name`, `size`, `sha256`, and a path under `minecraft/`. `.env`
 is ignored by version control and the values are embedded into the built
 client. Use HTTPS for the manifest: plain HTTP does not authenticate the
 manifest or its hashes. VDS publication is managed separately from this
 client repository.
+
+The action console retains up to 100 recent events, wraps long messages, and
+automatically scrolls to the latest entry.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,

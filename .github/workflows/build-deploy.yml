@@ -19,6 +19,7 @@ jobs:
     env:
       QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS || 'remote.example:25565' }}
       MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL || 'https://remote.example/mods.json' }}
+      NEOFORGE_URL: ${{ secrets.NEOFORGE_URL }}
       LAUNCHER_RELEASE_BASE_URL: ${{ secrets.LAUNCHER_RELEASE_BASE_URL }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
@@ -63,6 +64,7 @@ jobs:
           $required = @(
             "QUICK_PLAY_SERVER_ADDRESS",
             "MOD_MANIFEST_URL",
+            "NEOFORGE_URL",
             "LAUNCHER_RELEASE_BASE_URL",
             "TAURI_SIGNING_PRIVATE_KEY",
             "TAURI_SIGNING_PUBLIC_KEY"

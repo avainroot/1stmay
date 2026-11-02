@@ -160,6 +160,7 @@ export default function App() {
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const updateCheckingRef = useRef(false);
   const lastUpdateProgressRef = useRef(-10);
+  const logViewportRef = useRef<HTMLDivElement>(null);
   const launcherState = useLauncherStore((state) => state.launcherState);
   const nickname = useLauncherStore((state) => state.nickname);
   const busy = useLauncherStore((state) => state.busy);
@@ -176,6 +177,15 @@ export default function App() {
   const setProgress = useLauncherStore((state) => state.setProgress);
   const setError = useLauncherStore((state) => state.setError);
   const addLog = useLauncherStore((state) => state.addLog);
+
+  useEffect(() => {
+    const viewport = logViewportRef.current;
+    if (!viewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [logs]);
 
   const checkForUpdates = useCallback(async () => {
     if (updateCheckingRef.current) return;
@@ -834,29 +844,30 @@ export default function App() {
                   </CardTitle>
                   <span className="text-[9px] text-[#66513a]">SESSION / REMOTE</span>
                 </CardHeader>
-                <div
-                  className="flex h-[76px] flex-col justify-end space-y-0.5 overflow-hidden font-mono text-[9px] leading-3 sm:text-[10px]"
+                <ScrollArea
+                  viewportRef={logViewportRef}
+                  className="h-[76px] w-full font-mono text-[9px] leading-3 sm:text-[10px]"
                   aria-live="polite"
                 >
-                  {logs.slice(-6).map((line, index) => (
-                    <p
-                      key={`${index}-${line}`}
-                      className={
-                        line.includes("ERROR")
-                          ? "max-h-10 overflow-hidden whitespace-normal break-all text-rose-300"
-                          : `truncate ${
-                              index === logs.slice(-6).length - 1
-                                ? "text-lime-100/90"
-                                : "text-[#806d57]"
-                            }`
-                      }
-                      role={line.includes("ERROR") ? "alert" : undefined}
-                    >
-                      <span className="mr-2 text-lime-500/70">&gt;</span>
-                      {hideServerAddress(line)}
-                    </p>
-                  ))}
-                </div>
+                  <div className="space-y-0.5 pr-2">
+                    {logs.map((line, index) => (
+                      <p
+                        key={`${index}-${line}`}
+                        className={`whitespace-pre-wrap break-all ${
+                          line.includes("ERROR")
+                            ? "text-rose-300"
+                            : index === logs.length - 1
+                              ? "text-lime-100/90"
+                              : "text-[#806d57]"
+                        }`}
+                        role={line.includes("ERROR") ? "alert" : undefined}
+                      >
+                        <span className="mr-2 text-lime-500/70">&gt;</span>
+                        {hideServerAddress(line)}
+                      </p>
+                    ))}
+                  </div>
+                </ScrollArea>
               </CardContent>
             </Card>
           </div>

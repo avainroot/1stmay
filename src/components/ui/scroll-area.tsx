@@ -1,18 +1,22 @@
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, Ref } from "react";
 import { cn } from "../../lib/utils";
 
 export function ScrollArea({
   className,
   children,
+  viewportRef,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: HTMLAttributes<HTMLDivElement> & { viewportRef?: Ref<HTMLDivElement> }) {
   return (
     <ScrollAreaPrimitive.Root
       className={cn("relative min-h-0 overflow-hidden", className)}
       {...props}
     >
-      <ScrollAreaPrimitive.Viewport className="size-full overflow-auto rounded-[inherit] outline-none">
+      <ScrollAreaPrimitive.Viewport
+        ref={viewportRef}
+        className="size-full overflow-auto rounded-[inherit] outline-none"
+      >
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollAreaPrimitive.Scrollbar
