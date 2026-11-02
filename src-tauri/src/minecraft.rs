@@ -129,11 +129,10 @@ async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Resu
             format!("Не удалось запустить официальный установщик NeoForge: {error}")
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = installer_failure_detail(&output.stdout, &output.stderr);
         return Err(format!(
-            "Установщик NeoForge завершился с кодом {}: {}",
-            output.status,
-            truncate(&detail, 4000)
+            "Установщик NeoForge завершился с кодом {}.\n{}",
+            output.status, detail
         ));
     }
 
@@ -259,9 +258,42 @@ fn sha256(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+fn installer_failure_detail(stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let stdout = stdout.trim();
+    let stderr = stderr.trim();
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (false, false) => format!(
+            "stderr:\n{}\nstdout:\n{}",
+            truncate(stderr, 2000),
+            truncate(stdout, 2000)
+        ),
+        (false, true) => format!("stdout:\n{}", truncate(stdout, 4000)),
+        (true, false) => format!("stderr:\n{}", truncate(stderr, 4000)),
+        (true, true) => "Установщик не вывел диагностический текст.".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{fetch_neoforge_installer, InstallerDownloadError};
+    use super::{fetch_neoforge_installer, installer_failure_detail, InstallerDownloadError};
+
+    #[test]
+    fn installer_failure_detail_includes_stdout_when_stderr_is_empty() {
+        assert_eq!(
+            installer_failure_detail(b"Installer failed: missing library", b""),
+            "stdout:\nInstaller failed: missing library"
+        );
+    }
+
+    #[test]
+    fn installer_failure_detail_reports_when_both_streams_are_empty() {
+        assert_eq!(
+            installer_failure_detail(b"", b""),
+            "Установщик не вывел диагностический текст."
+        );
+    }
 
     #[tokio::test]
     async fn rejects_non_https_neoforge_sources_before_requesting_them() {
@@ -333,11 +365,12 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
-    let mut truncated = value.chars().take(max_chars).collect::<String>();
-    if value.chars().count() > max_chars {
-        truncated.push('…');
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return value.to_string();
     }
-    truncated
+    let tail = chars[chars.len() - max_chars..].iter().collect::<String>();
+    format!("…{tail}")
 }
 
 fn emit_progress(app: &AppHandle, message: &str) -> Result<(), String> {
