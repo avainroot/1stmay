@@ -312,7 +312,6 @@ fn build_classpath(
             universal.display()
         ));
     }
-    paths.push(universal);
     let mut seen = std::collections::HashSet::new();
     let joined = paths
         .into_iter()
