@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 pub struct Settings {
     pub nickname: Option<String>,
     pub install_dir: Option<PathBuf>,
+    pub config_synced: bool,
 }
 
 pub fn settings_directory(app: &AppHandle) -> Result<PathBuf, String> {
@@ -118,7 +119,7 @@ fn settings_directory_from_app_specific_data(application_data: &Path) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::settings_directory_from_app_specific_data;
+    use super::{settings_directory_from_app_specific_data, Settings};
     use std::path::Path;
 
     #[test]
@@ -129,6 +130,24 @@ mod tests {
             ))
             .unwrap(),
             Path::new(r"C:\Users\test\AppData\Roaming\1stMay")
+        );
+    }
+
+    #[test]
+    fn config_sync_flag_defaults_to_false_and_round_trips() {
+        let settings: Settings = serde_json::from_str(r#"{"nickname":"Player"}"#).unwrap();
+        assert!(!settings.config_synced);
+
+        let settings = Settings {
+            config_synced: true,
+            ..settings
+        };
+        let encoded = serde_json::to_string(&settings).unwrap();
+        assert!(encoded.contains(r#""config_synced":true"#));
+        assert!(
+            serde_json::from_str::<Settings>(&encoded)
+                .unwrap()
+                .config_synced
         );
     }
 }

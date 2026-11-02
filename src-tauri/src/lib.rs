@@ -21,6 +21,7 @@ pub fn run() {
             commands::get_memory_status,
             commands::save_install_directory,
             commands::play,
+            commands::synchronize_config_files,
             updater::check_and_download_update,
             updater::install_downloaded_update
         ])

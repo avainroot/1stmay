@@ -5,6 +5,7 @@ export interface LauncherState {
   installDir: string | null;
   installed: boolean;
   driveError: string | null;
+  configSynced: boolean;
 }
 
 export interface MemoryStatus {

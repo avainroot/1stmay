@@ -337,6 +337,24 @@ export default function App() {
     }
   }
 
+  async function synchronizeConfigs() {
+    setBusy(true);
+    setError("");
+    setProgress("Повторная синхронизация конфигураций…");
+    addLog("Запущена принудительная синхронизация конфигураций.");
+    try {
+      await invoke("synchronize_config_files");
+      const next = await invoke<LauncherState>("get_launcher_state");
+      setLauncherState(next);
+      addLog("Синхронизация конфигураций, шейдеров и данных FancyMenu завершена.");
+    } catch (reason) {
+      const message = formatError(reason);
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function play() {
     setBusy(true);
     setError("");
@@ -785,6 +803,25 @@ export default function App() {
                           : "Определяется автоматически")}
                   </p>
                 </div>
+                {isInstalled && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 w-full"
+                    onClick={() => void synchronizeConfigs()}
+                    disabled={
+                      busy ||
+                      gameRunning ||
+                      updateChecking ||
+                      updateDownloading ||
+                      updateInstalling
+                    }
+                    title="Повторно синхронизировать config, shaderpacks и fancymenu_data"
+                  >
+                    <RefreshCw size={13} />
+                    Синхронизировать конфиги
+                  </Button>
+                )}
               </CardContent>
             </Card>
 

@@ -13,6 +13,7 @@ pub struct LauncherState {
     install_dir: Option<String>,
     installed: bool,
     drive_error: Option<String>,
+    config_synced: bool,
 }
 
 #[tauri::command]
@@ -36,6 +37,7 @@ pub fn get_launcher_state(app: AppHandle) -> Result<LauncherState, String> {
         install_dir: install_dir.map(|path| path.to_string_lossy().into_owned()),
         installed,
         drive_error: detected.err(),
+        config_synced: stored.config_synced,
     })
 }
 
@@ -107,15 +109,33 @@ pub async fn play(app: AppHandle, nickname: Option<String>) -> Result<bool, Stri
         return Err("Проверка после установки Minecraft/NeoForge не пройдена".into());
     }
     memory::available_heap_mib()?;
-    app.emit(
-        "launcher-progress",
-        Progress {
-            message: "Синхронизация папки mods…".into(),
-        },
-    )
-    .map_err(|error| format!("Не удалось обновить статус лаунчера: {error}"))?;
-    sync::synchronize_mods(&app, &install_dir).await?;
+    if stored.config_synced {
+        sync::synchronize_mods(&app, &install_dir).await?;
+    } else {
+        sync::synchronize_mods_and_configs(&app, &install_dir).await?;
+        stored.config_synced = true;
+        settings::save(&app, &stored)?;
+    }
     launch::launch(&app, &install_dir, &nickname, &java).await
+}
+
+#[tauri::command]
+pub async fn synchronize_config_files(app: AppHandle) -> Result<(), String> {
+    if launch::is_game_running() {
+        return Err("Закройте Minecraft перед синхронизацией конфигураций.".into());
+    }
+    let mut stored = settings::load(&app)?;
+    let install_dir = stored
+        .install_dir
+        .clone()
+        .ok_or_else(|| "Папка игры не настроена. Сначала установите Minecraft.".to_string())?;
+    if !minecraft::is_installed(&install_dir) {
+        return Err("Сначала установите Minecraft, затем синхронизируйте конфигурации.".into());
+    }
+
+    sync::synchronize_configs(&app, &install_dir).await?;
+    stored.config_synced = true;
+    settings::save(&app, &stored)
 }
 
 #[derive(Clone, Serialize)]
