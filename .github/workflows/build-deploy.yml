@@ -149,22 +149,53 @@ jobs:
           done
 
           remote="root@$SERVER_IP"
-          ssh_args=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/known_hosts")
-          ssh "${ssh_args[@]}" "$remote" "mkdir -p -- '$VDS_RELEASE_DIR'"
-          rsync -av --checksum -e "ssh ${ssh_args[*]}" \
+          ssh_args=(-o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=3 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/known_hosts")
+          retry_deploy_command() {
+            local attempt status
+            for attempt in 1 2 3; do
+              if "$@"; then
+                return 0
+              else
+                status=$?
+              fi
+              if (( attempt == 3 )); then
+                echo "Deployment command failed after $attempt attempts (exit $status)." >&2
+                return "$status"
+              fi
+              echo "Deployment command failed (attempt $attempt/3, exit $status); retrying." >&2
+              sleep "$((attempt * 2))"
+            done
+          }
+
+          retry_deploy_command ssh "${ssh_args[@]}" "$remote" "mkdir -p -- '$VDS_RELEASE_DIR'"
+          retry_deploy_command rsync -av --checksum -e "ssh ${ssh_args[*]}" \
             "release/$installer" "release/$installer.sig" \
             "$remote:$VDS_RELEASE_DIR/"
-          rsync -av --checksum -e "ssh ${ssh_args[*]}" \
+          retry_deploy_command rsync -av --checksum -e "ssh ${ssh_args[*]}" \
             release/manifest.json "$remote:$VDS_RELEASE_DIR/.manifest.json.new"
 
-          ssh "${ssh_args[@]}" "$remote" sh -s -- "$VDS_RELEASE_DIR" "$version" <<'REMOTE'
+          remote_publish_script="$(cat <<'REMOTE'
           set -eu
           release_dir=$1
           version=$2
           installer="1stmay-launcher-${version}.exe"
 
-          mv -f -- "$release_dir/.manifest.json.new" "$release_dir/manifest.json"
+          if [ -f "$release_dir/.manifest.json.new" ]; then
+            mv -f -- "$release_dir/.manifest.json.new" "$release_dir/manifest.json"
+          else
+            published_version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$release_dir/manifest.json")"
+            if [ "$published_version" != "$version" ]; then
+              echo "Staged manifest is missing and published manifest has version $published_version, expected $version." >&2
+              exit 1
+            fi
+          fi
           find "$release_dir" -maxdepth 1 -type f \
             \( -name '1stmay-launcher-*.exe' -o -name '1stmay-launcher-*.exe.sig' \) \
             ! -name "$installer" ! -name "$installer.sig" -delete
           REMOTE
+          )"
+          publish_release() {
+            printf '%s\n' "$remote_publish_script" |
+              ssh "${ssh_args[@]}" "$remote" sh -s -- "$VDS_RELEASE_DIR" "$version"
+          }
+          retry_deploy_command publish_release
