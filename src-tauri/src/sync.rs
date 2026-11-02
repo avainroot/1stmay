@@ -43,32 +43,26 @@ struct ManifestFile {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ManagedArea {
     Mods,
-    Config,
-    Shaderpacks,
-    FancyMenuData,
+    Other,
 }
 
 impl ManagedArea {
     fn directory(self) -> &'static str {
         match self {
             Self::Mods => "mods",
-            Self::Config => "config",
-            Self::Shaderpacks => "shaderpacks",
-            Self::FancyMenuData => "fancymenu_data",
+            Self::Other => "",
         }
     }
 
     fn display_name(self) -> &'static str {
         match self {
             Self::Mods => "мода",
-            Self::Config => "конфигурации",
-            Self::Shaderpacks => "шейдерпака",
-            Self::FancyMenuData => "данных FancyMenu",
+            Self::Other => "игрового файла",
         }
     }
 
     fn is_config(self) -> bool {
-        self != Self::Mods
+        self == Self::Other
     }
 }
 
@@ -186,10 +180,7 @@ where
         .filter(|entry| scope.includes(entry.area))
         .collect::<Vec<_>>();
     if scope.includes_configs() && !selected.iter().any(|entry| entry.area.is_config()) {
-        return Err(
-        "В манифесте нет файлов config, shaderpacks или fancymenu_data. Проверьте общий манифест на сервере."
-                .into(),
-        );
+        return Err("В манифесте нет дополнительных игровых файлов для синхронизации.".into());
     }
 
     let game_root = fs::canonicalize(game_dir)
@@ -288,20 +279,9 @@ fn parse_manifest(bytes: &[u8]) -> Result<Vec<ManifestFile>, String> {
             let source_path = decoded.strip_prefix("minecraft/").ok_or_else(|| {
                 format!("Путь файла должен начинаться с minecraft/: {}", entry.path)
             })?;
-            let (folder, relative_path) = source_path
-                .split_once('/')
-                .ok_or_else(|| format!("В пути файла отсутствует имя: {}", entry.path))?;
-            let area = match folder {
-                "mods" => ManagedArea::Mods,
-                "config" => ManagedArea::Config,
-                "shaderpacks" => ManagedArea::Shaderpacks,
-                "fancymenu_data" => ManagedArea::FancyMenuData,
-                _ => {
-                    return Err(format!(
-                        "Синхронизация папки {folder} не разрешена: {}",
-                        entry.path
-                    ))
-                }
+            let (area, relative_path) = match source_path.strip_prefix("mods/") {
+                Some(path) => (ManagedArea::Mods, path),
+                None => (ManagedArea::Other, source_path),
             };
             validate_relative_path(relative_path)?;
             let filename = relative_path
@@ -423,6 +403,10 @@ fn is_windows_reserved_name(segment: &str) -> bool {
 }
 
 fn managed_root(game_root: &Path, area: ManagedArea) -> Result<PathBuf, String> {
+    if area == ManagedArea::Other {
+        return Ok(game_root.to_path_buf());
+    }
+
     let root = game_root.join(area.directory());
     fs::create_dir_all(&root)
         .map_err(|error| format!("Не удалось создать папку {}: {error}", area.directory()))?;
@@ -831,19 +815,29 @@ mod tests {
             .as_bytes(),
         )
         .unwrap();
-        assert_eq!(parsed[0].area, ManagedArea::Config);
-        assert_eq!(parsed[0].path, "client.toml");
-        assert_eq!(parsed[1].area, ManagedArea::Config);
-        assert_eq!(parsed[1].path, "adlods/Deposits/aluminum.cfg");
-        assert_eq!(parsed[2].area, ManagedArea::Shaderpacks);
-        assert_eq!(parsed[3].area, ManagedArea::FancyMenuData);
+        assert_eq!(parsed[0].area, ManagedArea::Other);
+        assert_eq!(parsed[0].path, "config/client.toml");
+        assert_eq!(parsed[1].area, ManagedArea::Other);
+        assert_eq!(parsed[1].path, "config/adlods/Deposits/aluminum.cfg");
+        assert_eq!(parsed[2].area, ManagedArea::Other);
+        assert_eq!(parsed[3].area, ManagedArea::Other);
+
+        let parsed = parse_manifest(
+            format!(
+                r#"{{"version":1,"files":[{{"name":"applied.json","size":6,"sha256":"{config_hash}","path":"minecraft/data/serilum/translations/applied.json"}}]}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(parsed[0].area, ManagedArea::Other);
+        assert_eq!(parsed[0].path, "data/serilum/translations/applied.json");
     }
 
     #[test]
-    fn rejects_manifest_entries_outside_supported_game_directories() {
+    fn rejects_manifest_entries_outside_the_minecraft_directory() {
         let hash = hex::encode(Sha256::digest(b"file"));
         let bytes = format!(
-            r#"{{"version":1,"generatedAt":"2026-11-02T17:25:51.952980+00:00","files":[{{"name":"options.txt","size":4,"sha256":"{hash}","path":"minecraft/options.txt"}}]}}"#
+            r#"{{"version":1,"generatedAt":"2026-11-02T17:25:51.952980+00:00","files":[{{"name":"options.txt","size":4,"sha256":"{hash}","path":"other/options.txt"}}]}}"#
         );
         assert!(parse_manifest(bytes.as_bytes()).is_err());
     }
@@ -1083,15 +1077,24 @@ mod tests {
         let manifest = manifest_bytes_for_paths(&[
             ("minecraft/mods/a.jar", "a.jar", b"mod"),
             ("minecraft/config/client.toml", "client.toml", b"config"),
+            (
+                "minecraft/data/serilum/translations/applied.json",
+                "applied.json",
+                b"marker",
+            ),
         ]);
         let (url, server) = serve(
-            3,
+            4,
             HashMap::from([
                 ("/manifest.json".into(), (manifest, None)),
                 ("/minecraft/mods/a.jar".into(), (b"mod".to_vec(), Some(3))),
                 (
                     "/minecraft/config/client.toml".into(),
                     (b"config".to_vec(), Some(6)),
+                ),
+                (
+                    "/minecraft/data/serilum/translations/applied.json".into(),
+                    (b"marker".to_vec(), Some(6)),
                 ),
             ]),
         )
@@ -1106,6 +1109,10 @@ mod tests {
         assert_eq!(
             std::fs::read(game_dir.join("config/client.toml")).unwrap(),
             b"config"
+        );
+        assert_eq!(
+            std::fs::read(game_dir.join("data/serilum/translations/applied.json")).unwrap(),
+            b"marker"
         );
         assert_eq!(
             std::fs::read_to_string(managed_file).unwrap(),
@@ -1133,7 +1140,7 @@ mod tests {
 
         assert!(result
             .unwrap_err()
-            .contains("В манифесте нет файлов config"));
+            .contains("В манифесте нет дополнительных игровых файлов"));
         assert!(!game_dir.join("config").exists());
     }
 

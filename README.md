@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.264`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.3`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.4`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -41,21 +41,22 @@ client. Use HTTPS for the manifest: plain HTTP does not authenticate the
 manifest or its hashes. VDS publication is managed separately from this
 client repository.
 
-On the first successful Play, the launcher synchronizes `mods`, `config`,
-`shaderpacks`, and `fancymenu_data`. It stores `config_synced: true` in
+On the first successful Play, the launcher synchronizes every file listed
+under `minecraft/` in the shared manifest, including `mods`, `config`,
+`shaderpacks`, `fancymenu_data`, and other directories such as `data`. It stores
+`config_synced: true` in
 `%APPDATA%\\1stMay\\settings.json` only after configuration synchronization
-succeeds. Later launches sync only `mods`. The **Синхронизировать конфиги**
-button forces another hash-checked sync of the three configuration folders.
-That operation replaces changed files listed by the server manifest but does
-not delete files absent from the manifest.
+completes. Later launches sync only `mods`. The **Синхронизировать конфиги**
+button forces another hash-checked sync of all other listed game files. That
+operation replaces changed files listed by the server manifest but does not
+delete local files absent from the manifest.
 
-The shared manifest endpoint lists files from all managed folders in its
-`files` array. Use `minecraft/mods/<relative-path>`,
-`minecraft/config/<relative-path>`,
-`minecraft/shaderpacks/<relative-path>`, or
-`minecraft/fancymenu_data/<relative-path>` as each entry's `path`; `name`
-must be the file's basename. These entries are consumed from the same
-`manifest.json`; there is no separate configuration manifest.
+The shared manifest endpoint lists files beneath the Minecraft source
+directory in its `files` array. Any safe relative path under `minecraft/` is
+synced to the corresponding location under the game directory; `name` must be
+the file's basename. Paths are still validated to prevent traversal outside
+the game directory. These entries are consumed from the same `manifest.json`;
+there is no separate configuration manifest.
 
 Run `pnpm run dev:tauri` to start the desktop app with updater checks enabled.
 The dev runner builds a temporary Tauri config from `LAUNCHER_RELEASE_BASE_URL`
