@@ -562,7 +562,7 @@ export default function App() {
                 build channel
               </p>
               <p className="mt-1 text-[10px] text-[#b2a38e]">
-                MC 1.21.1 // NEOFORGE 21.1.264
+                MC 1.21.1 // NEOFORGE 21.1.265
               </p>
               <p className="mt-1 text-[10px] text-lime-300/80">
                 1stMay Launcher v{packageInfo.version}
@@ -726,7 +726,7 @@ export default function App() {
                             )
                           ? "ПОДГОТОВКА"
                           : isInstalled
-                            ? "NEOFORGE / 21.1.264"
+                            ? "NEOFORGE / 21.1.265"
                             : "НЕ УСТАНОВЛЕН"}
                     </span>
                   </div>

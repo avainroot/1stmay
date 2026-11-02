@@ -1,14 +1,14 @@
 ;'-# 1stMay Launcher
 
 The launcher targets Minecraft Java Edition `1.21.1` with NeoForge
-`21.1.264` and Java `21`. NeoForge's official Maven installer artifact was
+`21.1.265` and Java `21`. NeoForge's official Maven installer artifact was
 checked against its published SHA-256; its embedded `version.json` identifies
-the profile as `neoforge-21.1.264`, inherits Minecraft `1.21.1`, and uses
+the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 `cpw.mods.bootstraplauncher.BootstrapLauncher`. The launcher reads that profile
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.4`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.5`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is

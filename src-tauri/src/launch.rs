@@ -470,7 +470,8 @@ mod tests {
 
     #[test]
     fn neoforge_ignore_list_uses_the_inherited_minecraft_jar_name() {
-        let game_values = HashMap::from([("${version_name}", "neoforge-21.1.264".to_string())]);
+        let game_values =
+            HashMap::from([("${version_name}", config::NEOFORGE_PROFILE_ID.to_string())]);
         let mut jvm_values = game_values.clone();
         jvm_values.insert("${version_name}", config::MINECRAFT_VERSION.to_string());
 
@@ -484,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             resolve_args(vec!["${version_name}".into()], &game_values).unwrap(),
-            ["neoforge-21.1.264"]
+            [config::NEOFORGE_PROFILE_ID]
         );
     }
 

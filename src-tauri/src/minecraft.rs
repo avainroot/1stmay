@@ -92,7 +92,10 @@ fn profile_path(game_dir: &Path) -> PathBuf {
 }
 
 async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Result<(), String> {
-    emit_progress(app, "Подготовка NeoForge 21.1.264…")?;
+    emit_progress(
+        app,
+        &format!("Подготовка NeoForge {}…", config::NEOFORGE_VERSION),
+    )?;
     let app_dir = settings::settings_directory(app)?;
     let cache = app_dir.join("cache");
     fs::create_dir_all(&cache)
