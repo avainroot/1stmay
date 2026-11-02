@@ -305,6 +305,14 @@ fn build_classpath(
             .join(config::MINECRAFT_VERSION)
             .join(format!("{}.jar", config::MINECRAFT_VERSION)),
     );
+    let universal = minecraft::neoforge_universal_path(game_dir);
+    if !minecraft::is_neoforge_universal_valid(game_dir) {
+        return Err(format!(
+            "Основной модуль NeoForge отсутствует или повреждён: {}. Установите NeoForge повторно.",
+            universal.display()
+        ));
+    }
+    paths.push(universal);
     let mut seen = std::collections::HashSet::new();
     let joined = paths
         .into_iter()
@@ -444,8 +452,11 @@ struct GameState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_default_language, offline_uuid, quick_play_args, resolve_args};
+    use super::{
+        build_classpath, ensure_default_language, offline_uuid, quick_play_args, resolve_args,
+    };
     use crate::config;
+    use crate::metadata::VersionMetadata;
     use std::{collections::HashMap, fs};
 
     #[test]
@@ -517,5 +528,15 @@ mod tests {
             fs::read_to_string(&options).unwrap(),
             "sound:1.0\nlang:fr_fr\n"
         );
+    }
+
+    #[test]
+    fn classpath_refuses_a_neoforge_profile_without_its_universal_module() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata: VersionMetadata =
+            serde_json::from_str(r#"{"id":"1.21.1","mainClass":"example.Main","libraries":[]}"#)
+                .unwrap();
+        let error = build_classpath(directory.path(), &metadata, &metadata).unwrap_err();
+        assert!(error.contains("Основной модуль NeoForge"));
     }
 }

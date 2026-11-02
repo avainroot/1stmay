@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.7`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.8`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -30,7 +30,14 @@ The offline UUID implementation is tested against the Java
 code has unit coverage.
 
 If the NeoForge installer fails, the action console includes the installer
-output from both stdout and stderr to help diagnose the cause.
+output from both stdout and stderr to help diagnose the cause. NeoForge
+`21.1.265` also requires its `universal` JAR as a game-layer module; the
+launcher verifies its pinned size and SHA-1, downloads it before running the
+installer, and adds it to the game classpath. If the official download times
+out, the launcher derives a sibling `-universal.jar` URL from `NEOFORGE_URL`,
+so the configured HTTPS mirror must publish both the installer and that
+universal artifact. An incomplete profile without the verified universal JAR
+is treated as not installed and is repaired before launch.
 
 Set `QUICK_PLAY_SERVER_ADDRESS`, `MOD_MANIFEST_URL`, `NEOFORGE_URL`, and
 `LAUNCHER_RELEASE_BASE_URL` in a local root `.env` file. Start from

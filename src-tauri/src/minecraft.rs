@@ -4,6 +4,7 @@ use crate::{
     runtime, settings,
 };
 use serde_json::Value;
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::{
     fs, io,
@@ -64,6 +65,7 @@ pub fn is_installed(game_dir: &Path) -> bool {
         return false;
     };
     metadata::artifact_is_valid(&client, client_artifact)
+        && is_neoforge_universal_valid(game_dir)
         && profile.get("id").and_then(Value::as_str) == Some(config::NEOFORGE_PROFILE_ID)
         && profile.get("inheritsFrom").and_then(Value::as_str) == Some(config::MINECRAFT_VERSION)
         && profile.get("mainClass").and_then(Value::as_str).is_some()
@@ -105,6 +107,7 @@ async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Resu
         config::NEOFORGE_VERSION
     ));
     ensure_installer(app, &installer).await?;
+    ensure_neoforge_universal(app, game_dir).await?;
 
     let launcher_profiles = game_dir.join("launcher_profiles.json");
     if !launcher_profiles.exists() {
@@ -141,6 +144,109 @@ async fn install_neoforge(app: &AppHandle, game_dir: &Path, java: &Path) -> Resu
         return Err("Установщик NeoForge создал профиль без mainClass".into());
     }
     Ok(())
+}
+
+pub fn neoforge_universal_path(game_dir: &Path) -> PathBuf {
+    game_dir
+        .join("libraries")
+        .join(config::NEOFORGE_UNIVERSAL_PATH)
+}
+
+pub fn is_neoforge_universal_valid(game_dir: &Path) -> bool {
+    fs::read(neoforge_universal_path(game_dir))
+        .ok()
+        .is_some_and(|bytes| verify_neoforge_universal(&bytes).is_ok())
+}
+
+async fn ensure_neoforge_universal(app: &AppHandle, game_dir: &Path) -> Result<(), String> {
+    let destination = neoforge_universal_path(game_dir);
+    if is_neoforge_universal_valid(game_dir) {
+        return Ok(());
+    }
+
+    emit_progress(app, "Подготовка основного модуля NeoForge…")?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("Не удалось создать HTTP-клиент NeoForge: {error}"))?;
+
+    let bytes = match fetch_verified_neoforge_universal(&client, config::NEOFORGE_UNIVERSAL_URL)
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(official_error) => {
+            let fallback_url = neoforge_universal_fallback_url()?;
+            emit_progress(
+                app,
+                "Официальный источник NeoForge недоступен; переключение на резервный источник…",
+            )?;
+            fetch_verified_neoforge_universal(&client, &fallback_url)
+                .await
+                .map_err(|fallback_error| {
+                    format!(
+                        "Не удалось получить обязательный модуль NeoForge. Официальный источник: {official_error}. Резервный источник: {fallback_error}. Проверьте доступ к источникам и наличие резервного файла universal."
+                    )
+                })?
+        }
+    };
+
+    write_atomic(&destination, &bytes).map_err(|error| {
+        format!(
+            "Не удалось сохранить основной модуль NeoForge {}: {error}",
+            destination.display()
+        )
+    })
+}
+
+async fn fetch_verified_neoforge_universal(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    let bytes = metadata::fetch_bytes(client, url).await?;
+    verify_neoforge_universal(&bytes)?;
+    Ok(bytes)
+}
+
+fn verify_neoforge_universal(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() as u64 != config::NEOFORGE_UNIVERSAL_SIZE {
+        return Err(format!(
+            "размер universal-модуля NeoForge не совпал: ожидалось {} байт, получено {}",
+            config::NEOFORGE_UNIVERSAL_SIZE,
+            bytes.len()
+        ));
+    }
+    let actual = hex::encode(Sha1::digest(bytes));
+    if actual != config::NEOFORGE_UNIVERSAL_SHA1 {
+        return Err(format!(
+            "SHA-1 universal-модуля NeoForge не совпал: ожидалось {}, получено {actual}",
+            config::NEOFORGE_UNIVERSAL_SHA1
+        ));
+    }
+    Ok(())
+}
+
+fn neoforge_universal_fallback_url() -> Result<String, String> {
+    let mut url = reqwest::Url::parse(config::NEOFORGE_FALLBACK_URL)
+        .map_err(|error| format!("Резервный URL NeoForge имеет неверный формат: {error}"))?;
+    if url.scheme() != "https" {
+        return Err("Резервный источник NeoForge должен использовать HTTPS".into());
+    }
+    let filename = url
+        .path_segments()
+        .and_then(Iterator::last)
+        .ok_or_else(|| "В резервном URL NeoForge не задано имя файла".to_string())?;
+    let universal_filename = filename
+        .strip_suffix("-installer.jar")
+        .map(|stem| format!("{stem}-universal.jar"))
+        .ok_or_else(|| {
+            "Резервный URL установщика NeoForge должен оканчиваться на -installer.jar".to_string()
+        })?;
+    url.path_segments_mut()
+        .map_err(|()| "Не удалось подготовить резервный URL NeoForge".to_string())?
+        .pop()
+        .push(&universal_filename);
+    Ok(url.into())
 }
 
 async fn ensure_installer(app: &AppHandle, destination: &Path) -> Result<(), String> {
@@ -277,7 +383,11 @@ fn installer_failure_detail(stdout: &[u8], stderr: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fetch_neoforge_installer, installer_failure_detail, InstallerDownloadError};
+    use super::{
+        fetch_neoforge_installer, installer_failure_detail, neoforge_universal_fallback_url,
+        verify_neoforge_universal, InstallerDownloadError,
+    };
+    use crate::config;
 
     #[test]
     fn installer_failure_detail_includes_stdout_when_stderr_is_empty() {
@@ -303,6 +413,26 @@ mod tests {
             .unwrap_err();
         assert!(matches!(&error, InstallerDownloadError::Failed(_)));
         assert!(error.message().contains("HTTPS"));
+    }
+
+    #[test]
+    fn universal_artifact_rejects_wrong_size_before_hash_comparison() {
+        let error = verify_neoforge_universal(b"not the NeoForge jar").unwrap_err();
+        assert!(error.contains("размер"));
+    }
+
+    #[test]
+    fn universal_artifact_rejects_a_hash_mismatch_at_the_expected_size() {
+        let bytes = vec![0; config::NEOFORGE_UNIVERSAL_SIZE as usize];
+        let error = verify_neoforge_universal(&bytes).unwrap_err();
+        assert!(error.contains("SHA-1"));
+    }
+
+    #[test]
+    fn universal_fallback_is_the_sibling_of_the_configured_installer() {
+        let fallback = neoforge_universal_fallback_url().unwrap();
+        let expected = config::NEOFORGE_FALLBACK_URL.replace("-installer.jar", "-universal.jar");
+        assert_eq!(fallback, expected);
     }
 }
 

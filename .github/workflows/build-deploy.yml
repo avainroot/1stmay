@@ -24,13 +24,13 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 12.4.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -41,7 +41,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: C:\Program Files (x86)\NSIS
           key: ${{ runner.os }}-nsis-3.11
@@ -88,7 +88,7 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: pnpm run build:release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: launcher-release
           if-no-files-found: error
