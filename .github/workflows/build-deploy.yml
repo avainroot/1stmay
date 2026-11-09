@@ -19,7 +19,7 @@ jobs:
     env:
       QUICK_PLAY_SERVER_ADDRESS: ${{ secrets.QUICK_PLAY_SERVER_ADDRESS || 'remote.example:25565' }}
       MOD_MANIFEST_URL: ${{ secrets.MOD_MANIFEST_URL || 'https://remote.example/mods.json' }}
-      TEXTURE_API_BASE_URL: ${{ secrets.TEXTURE_API_BASE_URL }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
       NEOFORGE_URL: ${{ secrets.NEOFORGE_URL }}
       LAUNCHER_RELEASE_BASE_URL: ${{ secrets.LAUNCHER_RELEASE_BASE_URL }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -65,7 +65,7 @@ jobs:
           $required = @(
             "QUICK_PLAY_SERVER_ADDRESS",
             "MOD_MANIFEST_URL",
-            "TEXTURE_API_BASE_URL",
+            "API_BASE_URL",
             "NEOFORGE_URL",
             "LAUNCHER_RELEASE_BASE_URL",
             "TAURI_SIGNING_PRIVATE_KEY",
@@ -79,7 +79,7 @@ jobs:
           $lines = @(
             "QUICK_PLAY_SERVER_ADDRESS=$env:QUICK_PLAY_SERVER_ADDRESS",
             "MOD_MANIFEST_URL=$env:MOD_MANIFEST_URL",
-            "TEXTURE_API_BASE_URL=$env:TEXTURE_API_BASE_URL"
+            "API_BASE_URL=$env:API_BASE_URL"
           )
           [System.IO.File]::WriteAllLines(
             (Join-Path $env:GITHUB_WORKSPACE ".env"),

@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.5.0`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.5.1`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -60,7 +60,7 @@ automatically scrolls to the latest entry. URLs are redacted from console
 messages so configured manifest, updater, and server addresses are not shown.
 
 Player skins, capes, and elytras use the NestJS texture API configured by
-`TEXTURE_API_BASE_URL` in the local `.env` (for example,
+`API_BASE_URL` in the local `.env` (for example,
 `https://remote.example/api`). Choose a texture type to load a PNG preview,
 upload it to `POST <base>/upload`, or delete only that type through
 `DELETE <base>/upload?username=<nickname>&type=<type>`. The saved Minecraft

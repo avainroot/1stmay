@@ -68,7 +68,7 @@ pub async fn get_current_texture(
         return Ok(None);
     };
     commands::validate_nickname(&nickname)?;
-    let (_, image_url) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname, texture_type)?;
+    let (_, image_url) = texture_urls(config::API_BASE_URL, &nickname, texture_type)?;
     let response = http_client()?
         .get(image_url)
         .send()
@@ -102,7 +102,7 @@ pub async fn save_texture(
     let texture_type = TextureType::parse(&texture_type)?;
     let nickname = current_nickname(&app)?;
     let bytes = read_valid_texture(Path::new(&path), texture_type)?;
-    let (upload_url, _) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname, texture_type)?;
+    let (upload_url, _) = texture_urls(config::API_BASE_URL, &nickname, texture_type)?;
     let file = multipart::Part::bytes(bytes)
         .file_name(format!("{nickname}.png"))
         .mime_str("image/png")
@@ -141,7 +141,7 @@ pub async fn save_texture(
 pub async fn delete_texture(app: AppHandle, texture_type: String) -> Result<(), String> {
     let texture_type = TextureType::parse(&texture_type)?;
     let nickname = current_nickname(&app)?;
-    let (mut delete_url, _) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname, texture_type)?;
+    let (mut delete_url, _) = texture_urls(config::API_BASE_URL, &nickname, texture_type)?;
     delete_url
         .query_pairs_mut()
         .append_pair("username", &nickname)
