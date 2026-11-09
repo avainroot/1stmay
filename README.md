@@ -59,13 +59,16 @@ The action console retains up to 100 recent events, wraps long messages, and
 automatically scrolls to the latest entry. URLs are redacted from console
 messages so configured manifest, updater, and server addresses are not shown.
 
-Player skins are managed locally in `%APPDATA%\\1stMay\\LocalSkin\\skins` and
-previewed with `skinview3d`; when none is saved, the viewer shows a neutral
-3D model. No skin service is used. The launcher opens at 1180×820 to keep the
-player, skin and system panels together with the action console visible.
-Before launching Minecraft, the selected player's skin is copied to
-`<gameDirectory>\\CustomSkinLoader\\LocalSkin\\skins`, which is the LocalSkin
-path resolved by CustomSkinLoader 15.1's `LegacyLoader`.
+Player skins use the NestJS texture API configured by `TEXTURE_API_BASE_URL`
+in the local `.env` (for example, `https://remote.example/api`). The launcher
+uploads a selected PNG to `POST <base>/upload` with the saved Minecraft
+nickname as the API username, and loads the preview from
+`<origin>/uploads/users/<nickname>/skins/<nickname>.png`. The 3D preview uses
+`skinview3d`; when no remote skin exists, it shows a neutral model. Skins are
+not copied into `%APPDATA%` or the Minecraft game directory, and no skin sync
+runs before launch. CustomSkinLoader must be configured separately to request
+the public texture URL. The API currently has no delete endpoint, so skin
+deletion is not offered in the launcher.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,

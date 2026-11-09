@@ -1,18 +1,14 @@
-use crate::{commands, settings};
+use crate::{commands, config, settings};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use png::Decoder;
-use serde::Serialize;
-use std::{
-    fs,
-    io::Cursor,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
-};
-use tauri::{AppHandle, Emitter};
+use reqwest::{multipart, Client, Response, StatusCode};
+use serde::{Deserialize, Serialize};
+use std::{io::Cursor, path::Path, time::Duration};
+use tauri::AppHandle;
+use url::Url;
 
 const MAX_SKIN_BYTES: usize = 2 * 1024 * 1024;
-const SKIN_CATEGORIES: [&str; 3] = ["skins", "capes", "elytras"];
-static SYNCHRONIZING: AtomicBool = AtomicBool::new(false);
+const SKIN_TYPE: &str = "skins";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,23 +16,37 @@ pub struct SkinPreview {
     data_url: String,
 }
 
-#[derive(Clone, Serialize)]
-struct Progress {
-    message: &'static str,
+#[derive(Deserialize)]
+struct UploadResponse {
+    success: bool,
+    username: String,
+    #[serde(rename = "type")]
+    upload_type: String,
+    filename: String,
 }
 
 #[tauri::command]
-pub fn get_current_skin(app: AppHandle) -> Result<Option<SkinPreview>, String> {
+pub async fn get_current_skin(app: AppHandle) -> Result<Option<SkinPreview>, String> {
     let Some(nickname) = settings::load(&app)?.nickname else {
         return Ok(None);
     };
     commands::validate_nickname(&nickname)?;
-    let path = stored_skin_path(&settings::settings_directory(&app)?, &nickname);
-    match fs::read(&path) {
-        Ok(bytes) => preview_from_bytes(&bytes).map(Some),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("Не удалось прочитать сохранённый скин: {error}")),
+    let (_, image_url) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname)?;
+    let response = http_client()?
+        .get(image_url)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось получить скин из API: {error}"))?;
+
+    if response.status() == StatusCode::NOT_FOUND {
+        return Ok(None);
     }
+
+    let response = response
+        .error_for_status()
+        .map_err(|error| format!("Не удалось получить скин из API: {error}"))?;
+    let bytes = read_bounded_response(response).await?;
+    preview_from_bytes(&bytes).map(Some)
 }
 
 #[tauri::command]
@@ -46,78 +56,41 @@ pub fn load_skin_preview(path: String) -> Result<SkinPreview, String> {
 }
 
 #[tauri::command]
-pub fn save_skin(app: AppHandle, path: String) -> Result<(), String> {
+pub async fn save_skin(app: AppHandle, path: String) -> Result<(), String> {
     let nickname = current_nickname(&app)?;
     let bytes = read_valid_skin(Path::new(&path))?;
-    let root = settings::settings_directory(&app)?.join("LocalSkin");
-    save_skin_file(&root, &nickname, &bytes)
-}
+    let (upload_url, _) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname)?;
+    let file = multipart::Part::bytes(bytes)
+        .file_name(format!("{nickname}.png"))
+        .mime_str("image/png")
+        .map_err(|error| format!("Не удалось подготовить PNG для загрузки: {error}"))?;
+    let form = multipart::Form::new()
+        .text("username", nickname.clone())
+        .text("type", SKIN_TYPE)
+        .part("file", file);
 
-#[tauri::command]
-pub fn delete_skin(app: AppHandle) -> Result<(), String> {
-    let nickname = current_nickname(&app)?;
-    let root = settings::settings_directory(&app)?.join("LocalSkin");
-    let path = skin_path(&root, "skins", &nickname);
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("Не удалось удалить скин для {nickname}: {error}")),
-    }
-}
+    let response = http_client()?
+        .post(upload_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось загрузить скин в API: {error}"))?;
+    let response = response
+        .error_for_status()
+        .map_err(|error| format!("API не сохранил скин: {error}"))?;
+    let result: UploadResponse = response
+        .json()
+        .await
+        .map_err(|error| format!("API вернул некорректный ответ о загрузке скина: {error}"))?;
 
-pub fn synchronize_before_launch(app: &AppHandle, game_dir: &Path) -> Result<(), String> {
-    if SYNCHRONIZING
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
+    if !result.success
+        || result.username != nickname
+        || result.upload_type != SKIN_TYPE
+        || result.filename != format!("{nickname}.png")
     {
-        return Err("Синхронизация локального скина уже выполняется.".into());
+        return Err("API вернул неожиданный результат загрузки скина.".into());
     }
-    let _guard = SyncGuard;
-    let nickname = current_nickname(app)?;
-    app.emit(
-        "launcher-progress",
-        Progress {
-            message: "Подготовка локального скина…",
-        },
-    )
-    .map_err(|error| format!("Не удалось обновить статус подготовки скина: {error}"))?;
 
-    let root = settings::settings_directory(app)?.join("LocalSkin");
-    synchronize_player_skin(&root, game_dir, &nickname)
-}
-
-fn synchronize_player_skin(
-    storage_root: &Path,
-    game_dir: &Path,
-    nickname: &str,
-) -> Result<(), String> {
-    commands::validate_nickname(nickname)?;
-    ensure_categories(storage_root)?;
-
-    let loader_root = game_dir.join("CustomSkinLoader").join("LocalSkin");
-    ensure_categories(&loader_root)?;
-
-    let source = skin_path(storage_root, "skins", nickname);
-    let destination = skin_path(&loader_root, "skins", nickname);
-    match fs::read(&source) {
-        Ok(bytes) => {
-            validate_skin_png(&bytes)?;
-            settings::atomic_write(&destination, &bytes)
-                .map_err(|error| format!("Не удалось подготовить скин для Minecraft: {error}"))?;
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match fs::remove_file(destination) {
-                Ok(()) => {}
-                Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(remove_error) => {
-                    return Err(format!(
-                        "Не удалось удалить устаревшую копию скина: {remove_error}"
-                    ))
-                }
-            }
-        }
-        Err(error) => return Err(format!("Не удалось прочитать локальный скин: {error}")),
-    }
     Ok(())
 }
 
@@ -129,29 +102,60 @@ fn current_nickname(app: &AppHandle) -> Result<String, String> {
     Ok(nickname)
 }
 
-fn ensure_categories(root: &Path) -> Result<(), String> {
-    for category in SKIN_CATEGORIES {
-        fs::create_dir_all(root.join(category))
-            .map_err(|error| format!("Не удалось подготовить папку текстур {category}: {error}"))?;
-    }
-    Ok(())
+fn http_client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("Не удалось подготовить подключение к API текстур: {error}"))
 }
 
-fn skin_path(root: &Path, category: &str, nickname: &str) -> PathBuf {
-    root.join(category).join(format!("{nickname}.png"))
-}
-
-fn stored_skin_path(settings_directory: &Path, nickname: &str) -> PathBuf {
-    skin_path(&settings_directory.join("LocalSkin"), "skins", nickname)
-}
-
-fn save_skin_file(root: &Path, nickname: &str, bytes: &[u8]) -> Result<(), String> {
+fn texture_urls(api_base: &str, nickname: &str) -> Result<(Url, Url), String> {
     commands::validate_nickname(nickname)?;
-    validate_skin_png(bytes)?;
-    ensure_categories(root)?;
-    let destination = skin_path(root, "skins", nickname);
-    settings::atomic_write(&destination, bytes)
-        .map_err(|error| format!("Не удалось сохранить скин для {nickname}: {error}"))
+    let mut base =
+        Url::parse(api_base).map_err(|error| format!("Некорректный адрес API текстур: {error}"))?;
+    if base.scheme() != "https"
+        || base.host_str().is_none()
+        || !base.username().is_empty()
+        || base.password().is_some()
+        || base.query().is_some()
+        || base.fragment().is_some()
+    {
+        return Err("Адрес API текстур должен быть безопасным HTTPS URL.".into());
+    }
+
+    let api_path = base.path().trim_end_matches('/');
+    base.set_path(&format!("{api_path}/"));
+    let upload_url = base
+        .join("upload")
+        .map_err(|error| format!("Некорректный адрес загрузки скинов: {error}"))?;
+    let mut image_url = base;
+    image_url.set_path(&format!(
+        "/uploads/users/{nickname}/{SKIN_TYPE}/{nickname}.png"
+    ));
+
+    Ok((upload_url, image_url))
+}
+
+async fn read_bounded_response(mut response: Response) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_SKIN_BYTES as u64)
+    {
+        return Err("Скин из API превышает допустимый размер 2 МиБ.".into());
+    }
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("Не удалось прочитать скин из API: {error}"))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_SKIN_BYTES {
+            return Err("Скин из API превышает допустимый размер 2 МиБ.".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn read_valid_skin(path: &Path) -> Result<Vec<u8>, String> {
@@ -162,14 +166,14 @@ fn read_valid_skin(path: &Path) -> Result<Vec<u8>, String> {
     {
         return Err("Выберите файл PNG.".into());
     }
-    let file_size = fs::metadata(path)
+    let file_size = std::fs::metadata(path)
         .map_err(|error| format!("Не удалось прочитать сведения о PNG-файле: {error}"))?
         .len();
     if file_size > MAX_SKIN_BYTES as u64 {
         return Err("PNG скина превышает допустимый размер 2 МиБ.".into());
     }
     let bytes =
-        fs::read(path).map_err(|error| format!("Не удалось прочитать PNG-файл: {error}"))?;
+        std::fs::read(path).map_err(|error| format!("Не удалось прочитать PNG-файл: {error}"))?;
     validate_skin_png(&bytes)?;
     Ok(bytes)
 }
@@ -204,23 +208,10 @@ fn preview_from_bytes(bytes: &[u8]) -> Result<SkinPreview, String> {
     })
 }
 
-struct SyncGuard;
-
-impl Drop for SyncGuard {
-    fn drop(&mut self) {
-        SYNCHRONIZING.store(false, Ordering::Release);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        save_skin_file, stored_skin_path, synchronize_player_skin, validate_skin_png,
-        MAX_SKIN_BYTES,
-    };
+    use super::{texture_urls, validate_skin_png, MAX_SKIN_BYTES};
     use png::{BitDepth, ColorType, Encoder};
-    use std::fs;
-    use tempfile::tempdir;
 
     fn png_bytes(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -249,79 +240,23 @@ mod tests {
     }
 
     #[test]
-    fn resolves_saved_skin_inside_local_skin_storage() {
-        let settings_directory = std::path::Path::new("settings");
+    fn builds_upload_and_public_texture_urls_from_the_api_base() {
+        let (upload, image) = texture_urls("https://remote.example/api", "Player123").unwrap();
+        assert_eq!(upload.as_str(), "https://remote.example/api/upload");
         assert_eq!(
-            stored_skin_path(settings_directory, "Player1"),
-            settings_directory
-                .join("LocalSkin")
-                .join("skins")
-                .join("Player1.png")
+            image.as_str(),
+            "https://remote.example/uploads/users/Player123/skins/Player123.png"
         );
     }
 
     #[test]
-    fn copies_and_removes_only_the_current_player_skin() {
-        let temporary = tempdir().unwrap();
-        let storage = temporary.path().join("LocalSkin");
-        let game = temporary.path().join("game");
-        let source = storage.join("skins").join("Player1.png");
-        fs::create_dir_all(source.parent().unwrap()).unwrap();
-        let original = png_bytes(64, 64, [10, 20, 30, 255]);
-        fs::write(&source, &original).unwrap();
-        let loader_root = game.join("CustomSkinLoader");
-        fs::create_dir_all(&loader_root).unwrap();
-        fs::write(loader_root.join("CustomSkinLoader.json"), b"unrelated").unwrap();
-        let unrelated_skin_dir = loader_root.join("LocalSkin/skins");
-        fs::create_dir_all(&unrelated_skin_dir).unwrap();
-        fs::write(unrelated_skin_dir.join("OtherPlayer.png"), b"unrelated").unwrap();
-
-        synchronize_player_skin(&storage, &game, "Player1").unwrap();
-        let copied = unrelated_skin_dir.join("Player1.png");
-        assert_eq!(fs::read(&copied).unwrap(), original);
-
-        let replacement = png_bytes(64, 64, [40, 50, 60, 255]);
-        fs::write(&source, &replacement).unwrap();
-        synchronize_player_skin(&storage, &game, "Player1").unwrap();
-        assert_eq!(fs::read(&copied).unwrap(), replacement);
-
-        fs::remove_file(source).unwrap();
-        synchronize_player_skin(&storage, &game, "Player1").unwrap();
-        assert!(!copied.exists());
-        assert_eq!(
-            fs::read(loader_root.join("CustomSkinLoader.json")).unwrap(),
-            b"unrelated"
-        );
-        assert_eq!(
-            fs::read(unrelated_skin_dir.join("OtherPlayer.png")).unwrap(),
-            b"unrelated"
-        );
-    }
-
-    #[test]
-    fn rejects_path_like_player_names_before_building_skin_path() {
-        assert!(crate::commands::validate_nickname("../Player").is_err());
+    fn rejects_insecure_api_urls_and_invalid_nicknames() {
+        assert!(texture_urls("http://remote.example/api", "Player123").is_err());
+        assert!(texture_urls("https://remote.example/api", "../Player").is_err());
     }
 
     #[test]
     fn rejects_corrupt_png_data() {
         assert!(validate_skin_png(b"not a PNG").is_err());
-    }
-
-    #[test]
-    fn failed_skin_replacement_preserves_the_previous_saved_texture() {
-        let temporary = tempdir().unwrap();
-        let root = temporary.path().join("LocalSkin");
-        let original = png_bytes(64, 64, [10, 20, 30, 255]);
-        save_skin_file(&root, "Player1", &original).unwrap();
-        assert!(save_skin_file(&root, "Player1", b"invalid replacement").is_err());
-        assert_eq!(fs::read(root.join("skins/Player1.png")).unwrap(), original);
-
-        let replacement = png_bytes(64, 64, [40, 50, 60, 255]);
-        save_skin_file(&root, "Player1", &replacement).unwrap();
-        assert_eq!(
-            fs::read(root.join("skins/Player1.png")).unwrap(),
-            replacement
-        );
     }
 }

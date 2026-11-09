@@ -7,6 +7,7 @@ fn main() {
     for name in [
         "QUICK_PLAY_SERVER_ADDRESS",
         "MOD_MANIFEST_URL",
+        "TEXTURE_API_BASE_URL",
         "NEOFORGE_URL",
     ] {
         println!("cargo:rerun-if-env-changed={name}");
@@ -20,6 +21,7 @@ fn main() {
     for name in [
         "QUICK_PLAY_SERVER_ADDRESS",
         "MOD_MANIFEST_URL",
+        "TEXTURE_API_BASE_URL",
         "NEOFORGE_URL",
     ] {
         let value = env::var(name).unwrap_or_else(|_| panic!("В .env не задан {name}"));

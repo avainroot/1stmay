@@ -24,7 +24,6 @@ import {
   RefreshCw,
   Save,
   Terminal,
-  Trash2,
   UserRound,
 } from "lucide-react";
 import { MinecraftDiamond, MinecraftIronIngot } from "minecraft-items-react";
@@ -203,10 +202,10 @@ export default function App() {
 
   useEffect(() => {
     const playerName = launcherState?.nickname;
+    setSkinPreview(null);
+    setSkinFile(null);
+    setHasSavedSkin(false);
     if (!playerName) {
-      setSkinPreview(null);
-      setSkinFile(null);
-      setHasSavedSkin(false);
       return;
     }
     let active = true;
@@ -444,23 +443,6 @@ export default function App() {
       setHasSavedSkin(true);
       setSkinFile(null);
       addLog("Скин сохранён для текущего никнейма.");
-    } catch (reason) {
-      setError(formatError(reason));
-    } finally {
-      setSkinBusy(false);
-    }
-  }
-
-  async function deleteSkin() {
-    if (skinBusy) return;
-    setSkinBusy(true);
-    setError("");
-    try {
-      await invoke("delete_skin");
-      setSkinPreview(null);
-      setSkinFile(null);
-      setHasSavedSkin(false);
-      addLog("Сохранённый скин удалён.");
     } catch (reason) {
       setError(formatError(reason));
     } finally {
@@ -1032,18 +1014,6 @@ export default function App() {
                         >
                           <Save size={13} />
                           Сохранить
-                        </Button>
-                      )}
-                      {hasSavedSkin && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-full text-rose-300 hover:text-rose-200"
-                          onClick={() => void deleteSkin()}
-                          disabled={busy || skinBusy || updateInstalling}
-                        >
-                          <Trash2 size={13} />
-                          Удалить скин
                         </Button>
                       )}
                     </div>

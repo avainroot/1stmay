@@ -43,8 +43,6 @@ pub async fn launch(
     if profile.main_class.is_empty() {
         return Err("В профиле NeoForge отсутствует главный класс".into());
     }
-    crate::skin::synchronize_before_launch(app, game_dir)?;
-
     let classpath = build_classpath(game_dir, &parent, &profile)?;
     let natives_dir = settings::settings_directory(app)?
         .join("cache")
