@@ -25,6 +25,14 @@ struct UploadResponse {
     filename: String,
 }
 
+#[derive(Deserialize)]
+struct DeleteSkinResponse {
+    success: bool,
+    username: String,
+    #[serde(rename = "type")]
+    upload_type: String,
+}
+
 #[tauri::command]
 pub async fn get_current_skin(app: AppHandle) -> Result<Option<SkinPreview>, String> {
     let Some(nickname) = settings::load(&app)?.nickname else {
@@ -89,6 +97,34 @@ pub async fn save_skin(app: AppHandle, path: String) -> Result<(), String> {
         || result.filename != format!("{nickname}.png")
     {
         return Err("API вернул неожиданный результат загрузки скина.".into());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_skin(app: AppHandle) -> Result<(), String> {
+    let nickname = current_nickname(&app)?;
+    let (mut delete_url, _) = texture_urls(config::TEXTURE_API_BASE_URL, &nickname)?;
+    delete_url
+        .query_pairs_mut()
+        .append_pair("username", &nickname);
+
+    let response = http_client()?
+        .delete(delete_url)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось удалить скин через API: {error}"))?;
+    let response = response
+        .error_for_status()
+        .map_err(|error| format!("API не удалил скин: {error}"))?;
+    let result: DeleteSkinResponse = response
+        .json()
+        .await
+        .map_err(|error| format!("API вернул некорректный ответ об удалении скина: {error}"))?;
+
+    if !result.success || result.username != nickname || result.upload_type != SKIN_TYPE {
+        return Err("API вернул неожиданный результат удаления скина.".into());
     }
 
     Ok(())
@@ -246,6 +282,14 @@ mod tests {
         assert_eq!(
             image.as_str(),
             "https://remote.example/uploads/users/Player123/skins/Player123.png"
+        );
+        let mut delete = upload;
+        delete
+            .query_pairs_mut()
+            .append_pair("username", "Player123");
+        assert_eq!(
+            delete.as_str(),
+            "https://remote.example/api/upload?username=Player123"
         );
     }
 

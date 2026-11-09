@@ -67,8 +67,9 @@ nickname as the API username, and loads the preview from
 `skinview3d`; when no remote skin exists, it shows a neutral model. Skins are
 not copied into `%APPDATA%` or the Minecraft game directory, and no skin sync
 runs before launch. CustomSkinLoader must be configured separately to request
-the public texture URL. The API currently has no delete endpoint, so skin
-deletion is not offered in the launcher.
+the public texture URL. The **Удалить скин** button deletes only the current
+player's skin through `DELETE <base>/upload?username=<nickname>`; capes and
+elytras are not affected.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,
