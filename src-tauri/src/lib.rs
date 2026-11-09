@@ -7,6 +7,7 @@ mod minecraft;
 mod platform;
 mod runtime;
 mod settings;
+mod skin;
 mod sync;
 mod updater;
 
@@ -29,6 +30,10 @@ pub fn run() {
             commands::save_install_directory,
             commands::play,
             commands::synchronize_config_files,
+            skin::get_current_skin,
+            skin::load_skin_preview,
+            skin::save_skin,
+            skin::delete_skin,
             updater::check_and_download_update,
             updater::install_downloaded_update
         ])

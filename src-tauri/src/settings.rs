@@ -61,7 +61,7 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
         .map_err(|error| format!("Не удалось сохранить настройки {}: {error}", path.display()))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?

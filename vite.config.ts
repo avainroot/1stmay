@@ -18,5 +18,19 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/.pnpm/three@")) return "three";
+          if (
+            id.includes("/node_modules/.pnpm/skinview-utils@") ||
+            id.includes("/node_modules/.pnpm/skinview3d@")
+          ) {
+            return "skinview3d";
+          }
+          return undefined;
+        },
+      },
+    },
   },
 });

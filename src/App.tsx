@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -14,6 +14,7 @@ import {
   Download,
   FolderOpen,
   Gamepad2,
+  ImageUp,
   LoaderCircle,
   LockKeyhole,
   MemoryStick,
@@ -21,7 +22,9 @@ import {
   Play,
   Radio,
   RefreshCw,
+  Save,
   Terminal,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { MinecraftDiamond, MinecraftIronIngot } from "minecraft-items-react";
@@ -30,6 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Progress } from "./components/ui/progress";
 import { ScrollArea } from "./components/ui/scroll-area";
+import type { SkinModel } from "./components/skin-viewer";
 import {
   useLauncherStore,
   type LauncherState,
@@ -56,8 +60,18 @@ interface AvailableUpdate {
   version: string;
 }
 
+interface SkinPreview {
+  dataUrl: string;
+}
+
 type UpdateVisualState =
   "idle" | "checking" | "downloading" | "installing" | "current" | "available" | "error";
+
+const SkinViewer = lazy(() =>
+  import("./components/skin-viewer").then((module) => ({
+    default: module.SkinViewer,
+  })),
+);
 
 function ParticleBackdrop() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -158,6 +172,11 @@ export default function App() {
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("Обновления не проверены");
   const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [skinPreview, setSkinPreview] = useState<string | null>(null);
+  const [skinFile, setSkinFile] = useState<string | null>(null);
+  const [hasSavedSkin, setHasSavedSkin] = useState(false);
+  const [skinModel, setSkinModel] = useState<SkinModel>("default");
+  const [skinBusy, setSkinBusy] = useState(false);
   const updateCheckingRef = useRef(false);
   const lastUpdateProgressRef = useRef(-10);
   const logViewportRef = useRef<HTMLDivElement>(null);
@@ -177,6 +196,34 @@ export default function App() {
   const setProgress = useLauncherStore((state) => state.setProgress);
   const setError = useLauncherStore((state) => state.setError);
   const addLog = useLauncherStore((state) => state.addLog);
+  const reportSkinPreviewError = useCallback(
+    (message: string) => setError(`Не удалось показать скин: ${message}`),
+    [setError],
+  );
+
+  useEffect(() => {
+    const playerName = launcherState?.nickname;
+    if (!playerName) {
+      setSkinPreview(null);
+      setSkinFile(null);
+      setHasSavedSkin(false);
+      return;
+    }
+    let active = true;
+    void invoke<SkinPreview | null>("get_current_skin")
+      .then((skin) => {
+        if (!active) return;
+        setSkinPreview(skin?.dataUrl ?? null);
+        setSkinFile(null);
+        setHasSavedSkin(skin !== null);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(formatError(reason));
+      });
+    return () => {
+      active = false;
+    };
+  }, [launcherState?.nickname, setError]);
 
   useEffect(() => {
     const viewport = logViewportRef.current;
@@ -362,6 +409,62 @@ export default function App() {
       setError(message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function chooseSkinFile() {
+    if (skinBusy) return;
+    setSkinBusy(true);
+    setError("");
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Minecraft skin PNG", extensions: ["png"] }],
+      });
+      if (typeof selected !== "string") return;
+      const preview = await invoke<SkinPreview>("load_skin_preview", {
+        path: selected,
+      });
+      setSkinPreview(preview.dataUrl);
+      setSkinFile(selected);
+      addLog("Скин загружен для предпросмотра.");
+    } catch (reason) {
+      setError(formatError(reason));
+    } finally {
+      setSkinBusy(false);
+    }
+  }
+
+  async function saveSkin() {
+    if (!skinFile || skinBusy) return;
+    setSkinBusy(true);
+    setError("");
+    try {
+      await invoke("save_skin", { path: skinFile });
+      setHasSavedSkin(true);
+      setSkinFile(null);
+      addLog("Скин сохранён для текущего никнейма.");
+    } catch (reason) {
+      setError(formatError(reason));
+    } finally {
+      setSkinBusy(false);
+    }
+  }
+
+  async function deleteSkin() {
+    if (skinBusy) return;
+    setSkinBusy(true);
+    setError("");
+    try {
+      await invoke("delete_skin");
+      setSkinPreview(null);
+      setSkinFile(null);
+      setHasSavedSkin(false);
+      addLog("Сохранённый скин удалён.");
+    } catch (reason) {
+      setError(formatError(reason));
+    } finally {
+      setSkinBusy(false);
     }
   }
 
@@ -580,8 +683,8 @@ export default function App() {
             </div>
           </section>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] grid-rows-[minmax(max-content,1fr)_112px] gap-2">
-            <Card className="flex min-h-0 flex-col overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 lg:grid-cols-[minmax(240px,0.8fr)_minmax(430px,1.35fr)_minmax(270px,0.9fr)] lg:grid-rows-[minmax(0,1fr)_112px]">
+            <Card className="order-1 flex min-h-0 flex-col overflow-hidden lg:col-start-1 lg:row-start-1">
               <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
                 <CardHeader className="mb-3">
                   <CardTitle className="flex items-center gap-2 leading-none">
@@ -636,7 +739,7 @@ export default function App() {
                         size="sm"
                         className="h-7"
                         onClick={() => void chooseDirectory()}
-                        disabled={busy || updateInstalling || !launcherState}
+                        disabled={busy || skinBusy || updateInstalling || !launcherState}
                         title="Выбрать папку"
                       >
                         <FolderOpen size={13} />
@@ -672,6 +775,7 @@ export default function App() {
                     onClick={() => void play()}
                     disabled={
                       busy ||
+                      skinBusy ||
                       updateChecking ||
                       updateDownloading ||
                       updateInstalling ||
@@ -696,8 +800,8 @@ export default function App() {
               </CardContent>
             </Card>
 
-            <Card className="flex min-h-max flex-col">
-              <CardContent className="flex flex-1 flex-col p-3 sm:p-4">
+            <Card className="order-3 flex min-h-0 flex-col overflow-hidden lg:col-start-3 lg:row-start-1">
+              <CardContent className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 sm:p-4">
                 <CardHeader className="mb-3">
                   <CardTitle className="flex items-center gap-2">
                     <Cpu size={14} className="text-lime-300" />
@@ -821,6 +925,7 @@ export default function App() {
                     onClick={() => void synchronizeConfigs()}
                     disabled={
                       busy ||
+                      skinBusy ||
                       gameRunning ||
                       updateChecking ||
                       updateDownloading ||
@@ -835,7 +940,119 @@ export default function App() {
               </CardContent>
             </Card>
 
-            <Card className="col-span-2 h-[112px] max-h-[112px] self-start overflow-hidden">
+            <Card className="order-2 flex min-h-[300px] flex-col overflow-hidden lg:col-start-2 lg:row-start-1">
+              <CardContent className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+                <CardHeader className="mb-2 min-w-0 flex-col items-start gap-1">
+                  <CardTitle className="flex min-w-0 items-center gap-2">
+                    <UserRound size={14} className="text-lime-300" />
+                    <span className="truncate">Скин игрока</span>
+                  </CardTitle>
+                  <span
+                    className="w-full min-w-0 truncate text-[9px] text-[#806d57]"
+                    title={
+                      skinFile
+                        ? `Предпросмотр: ${skinFile.split(/[\\/]/).pop()} • не сохранён`
+                        : hasSavedSkin
+                          ? `Сохранён для ${launcherState?.nickname ?? "игрока"}`
+                          : undefined
+                    }
+                  >
+                    {!launcherState?.nickname
+                      ? "Сначала сохраните никнейм нажатием «Играть»"
+                      : skinFile
+                        ? `Предпросмотр: ${skinFile.split(/[\\/]/).pop()} • не сохранён`
+                        : hasSavedSkin
+                          ? `Сохранён для ${launcherState.nickname}`
+                          : "Для текущего никнейма скин не сохранён"}
+                  </span>
+                </CardHeader>
+                <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
+                  <Suspense
+                    fallback={
+                      <div className="grid min-h-[260px] flex-1 place-items-center rounded-md border border-[#49392a]/80 bg-[#17130f] text-[9px] text-[#806d57]">
+                        Загрузка 3D-просмотрщика…
+                      </div>
+                    }
+                  >
+                    <SkinViewer
+                      source={skinPreview}
+                      model={skinModel}
+                      onError={reportSkinPreviewError}
+                      onModelDetected={setSkinModel}
+                    />
+                  </Suspense>
+                  <div className="flex shrink-0 flex-col gap-2 sm:w-52">
+                    <p className="text-[9px] uppercase tracking-[0.16em] text-[#9a8872]">
+                      Модель персонажа
+                    </p>
+                    <div className="grid grid-cols-2 gap-1 rounded-md border border-[#49392a] bg-[#17130f] p-1">
+                      <Button
+                        variant={skinModel === "default" ? "primary" : "ghost"}
+                        size="sm"
+                        className="h-8 justify-center px-2 text-center text-[9px] leading-none"
+                        onClick={() => setSkinModel("default")}
+                        disabled={!launcherState?.nickname || busy || skinBusy}
+                      >
+                        Classic
+                      </Button>
+                      <Button
+                        variant={skinModel === "slim" ? "primary" : "ghost"}
+                        size="sm"
+                        className="h-8 justify-center px-2 text-center text-[9px] leading-none"
+                        onClick={() => setSkinModel("slim")}
+                        disabled={!launcherState?.nickname || busy || skinBusy}
+                      >
+                        Slim
+                      </Button>
+                    </div>
+                    <p className="text-[9px] leading-relaxed text-[#806d57]">
+                      Поддерживаются PNG-текстуры 64×64 и 64×32. Перетащите модель мышью,
+                      чтобы повернуть.
+                    </p>
+                    <div className="mt-auto grid grid-cols-2 gap-2 sm:grid-cols-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => void chooseSkinFile()}
+                        disabled={
+                          !launcherState?.nickname || busy || skinBusy || updateInstalling
+                        }
+                      >
+                        <ImageUp size={13} />
+                        Загрузить PNG
+                      </Button>
+                      {skinFile && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => void saveSkin()}
+                          disabled={busy || skinBusy || updateInstalling}
+                        >
+                          <Save size={13} />
+                          Сохранить
+                        </Button>
+                      )}
+                      {hasSavedSkin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full text-rose-300 hover:text-rose-200"
+                          onClick={() => void deleteSkin()}
+                          disabled={busy || skinBusy || updateInstalling}
+                        >
+                          <Trash2 size={13} />
+                          Удалить скин
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="order-4 h-[112px] max-h-[112px] self-start overflow-hidden lg:col-span-3 lg:row-start-2">
               <CardContent className="px-3 pb-2 pt-2">
                 <CardHeader className="mb-1">
                   <CardTitle className="flex items-center gap-2 text-[9px]">

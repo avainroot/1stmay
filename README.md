@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.10`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.3.13`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -58,6 +58,14 @@ client repository.
 The action console retains up to 100 recent events, wraps long messages, and
 automatically scrolls to the latest entry. URLs are redacted from console
 messages so configured manifest, updater, and server addresses are not shown.
+
+Player skins are managed locally in `%APPDATA%\\1stMay\\LocalSkin\\skins` and
+previewed with `skinview3d`; when none is saved, the viewer shows a neutral
+3D model. No skin service is used. The launcher opens at 1180×820 to keep the
+player, skin and system panels together with the action console visible.
+Before launching Minecraft, the selected player's skin is copied to
+`<gameDirectory>\\CustomSkinLoader\\LocalSkin\\skins`, which is the LocalSkin
+path resolved by CustomSkinLoader 15.1's `LegacyLoader`.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,
