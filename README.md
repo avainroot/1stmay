@@ -8,7 +8,7 @@ the profile as `neoforge-21.1.265`, inherits Minecraft `1.21.1`, and uses
 and combines its launch arguments and libraries with the Mojang version
 metadata; it does not use a third-party launcher library.
 
-The project version is `1.3.13`. It targets 64-bit Windows 10 and Windows 11.
+The project version is `1.5.0`. It targets 64-bit Windows 10 and Windows 11.
 Windows 7/8 are not supported because the selected Java 21 runtime requires a
 newer Windows release. Microsoft Edge WebView2 Runtime is also required; the
 NSIS installer installs it when needed. Windows 10 and 11 compatibility is
@@ -59,17 +59,22 @@ The action console retains up to 100 recent events, wraps long messages, and
 automatically scrolls to the latest entry. URLs are redacted from console
 messages so configured manifest, updater, and server addresses are not shown.
 
-Player skins use the NestJS texture API configured by `TEXTURE_API_BASE_URL`
-in the local `.env` (for example, `https://remote.example/api`). The launcher
-uploads a selected PNG to `POST <base>/upload` with the saved Minecraft
-nickname as the API username, and loads the preview from
-`<origin>/uploads/users/<nickname>/skins/<nickname>.png`. The 3D preview uses
-`skinview3d`; when no remote skin exists, it shows a neutral model. Skins are
-not copied into `%APPDATA%` or the Minecraft game directory, and no skin sync
-runs before launch. CustomSkinLoader must be configured separately to request
-the public texture URL. The **Удалить скин** button deletes only the current
-player's skin through `DELETE <base>/upload?username=<nickname>`; capes and
-elytras are not affected.
+Player skins, capes, and elytras use the NestJS texture API configured by
+`TEXTURE_API_BASE_URL` in the local `.env` (for example,
+`https://remote.example/api`). Choose a texture type to load a PNG preview,
+upload it to `POST <base>/upload`, or delete only that type through
+`DELETE <base>/upload?username=<nickname>&type=<type>`. The saved Minecraft
+nickname is used as the API username. The 3D preview renders skins and the
+selected cape or elytra with `skinview3d`; skins must be 64×64 or 64×32, while
+capes and elytras must use the viewer-supported 2:1, 22:17, or 46:22 image
+proportions. When no skin exists, the viewer shows a neutral model. Textures
+are not copied into `%APPDATA%` or the Minecraft game directory, and no texture
+sync runs before launch. CustomSkinLoader must be configured separately to
+request the public URLs
+`<origin>/uploads/users/<nickname>/(skins|capes|elytras)/<nickname>.png`.
+The API currently has no authentication: any client can overwrite or delete
+textures for any nickname, so these controls are not protected from other
+clients until authentication is added.
 
 On the first successful Play, the launcher synchronizes every file listed
 under `minecraft/` in the shared manifest, including `mods`, `config`,

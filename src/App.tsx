@@ -33,7 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Progress } from "./components/ui/progress";
 import { ScrollArea } from "./components/ui/scroll-area";
-import type { SkinModel } from "./components/skin-viewer";
+import type { SkinModel, TextureType } from "./components/skin-viewer";
 import {
   useLauncherStore,
   type LauncherState,
@@ -63,6 +63,18 @@ interface AvailableUpdate {
 interface SkinPreview {
   dataUrl: string;
 }
+
+interface PendingTexture {
+  path: string;
+  preview: string;
+}
+
+const TEXTURE_TYPES: TextureType[] = ["skins", "capes", "elytras"];
+const TEXTURE_LABELS: Record<TextureType, string> = {
+  skins: "Скин",
+  capes: "Плащ",
+  elytras: "Элитра",
+};
 
 type UpdateVisualState =
   "idle" | "checking" | "downloading" | "installing" | "current" | "available" | "error";
@@ -172,11 +184,21 @@ export default function App() {
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("Обновления не проверены");
   const [updateInstalling, setUpdateInstalling] = useState(false);
-  const [skinPreview, setSkinPreview] = useState<string | null>(null);
-  const [skinFile, setSkinFile] = useState<string | null>(null);
-  const [hasSavedSkin, setHasSavedSkin] = useState(false);
+  const [savedTextures, setSavedTextures] = useState<Record<TextureType, string | null>>({
+    skins: null,
+    capes: null,
+    elytras: null,
+  });
+  const [pendingTextures, setPendingTextures] = useState<
+    Record<TextureType, PendingTexture | null>
+  >({
+    skins: null,
+    capes: null,
+    elytras: null,
+  });
+  const [selectedTextureType, setSelectedTextureType] = useState<TextureType>("skins");
   const [skinModel, setSkinModel] = useState<SkinModel>("default");
-  const [skinBusy, setSkinBusy] = useState(false);
+  const [textureBusy, setTextureBusy] = useState(false);
   const updateCheckingRef = useRef(false);
   const lastUpdateProgressRef = useRef(-10);
   const logViewportRef = useRef<HTMLDivElement>(null);
@@ -197,33 +219,63 @@ export default function App() {
   const setError = useLauncherStore((state) => state.setError);
   const addLog = useLauncherStore((state) => state.addLog);
   const reportSkinPreviewError = useCallback(
-    (message: string) => setError(`Не удалось показать скин: ${message}`),
+    (message: string) => setError(`Не удалось показать текстуру: ${message}`),
     [setError],
   );
 
   useEffect(() => {
     const playerName = launcherState?.nickname;
-    setSkinPreview(null);
-    setSkinFile(null);
-    setHasSavedSkin(false);
+    setSavedTextures({ skins: null, capes: null, elytras: null });
+    setPendingTextures({ skins: null, capes: null, elytras: null });
     if (!playerName) {
       return;
     }
     let active = true;
-    void invoke<SkinPreview | null>("get_current_skin")
-      .then((skin) => {
-        if (!active) return;
-        setSkinPreview(skin?.dataUrl ?? null);
-        setSkinFile(null);
-        setHasSavedSkin(skin !== null);
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(formatError(reason));
+    void Promise.allSettled(
+      TEXTURE_TYPES.map((textureType) =>
+        invoke<SkinPreview | null>("get_current_texture", { textureType }),
+      ),
+    ).then((results) => {
+      if (!active) return;
+      const getTexture = (index: number) => {
+        const result = results[index];
+        return result.status === "fulfilled" ? (result.value?.dataUrl ?? null) : null;
+      };
+      setSavedTextures({
+        skins: getTexture(0),
+        capes: getTexture(1),
+        elytras: getTexture(2),
       });
+      const failedIndex = results.findIndex((result) => result.status === "rejected");
+      if (failedIndex !== -1) {
+        const result = results[failedIndex];
+        if (result.status === "rejected") {
+          setError(
+            `Не удалось получить ${TEXTURE_LABELS[TEXTURE_TYPES[failedIndex]].toLowerCase()}: ${formatError(result.reason)}`,
+          );
+        }
+      }
+    });
     return () => {
       active = false;
     };
   }, [launcherState?.nickname, setError]);
+
+  const pendingTexture = pendingTextures[selectedTextureType];
+  const hasSavedTexture = savedTextures[selectedTextureType] !== null;
+  const textureDescription = pendingTexture
+    ? `Предпросмотр: ${pendingTexture.path.split(/[\\/]/).pop()} • не сохранена`
+    : hasSavedTexture
+      ? `${TEXTURE_LABELS[selectedTextureType]} сохранена для ${launcherState?.nickname ?? "игрока"}`
+      : `Для текущего никнейма ${TEXTURE_LABELS[selectedTextureType].toLowerCase()} не сохранена`;
+  const activeCape = selectedTextureType === "capes";
+  const activeElytra = selectedTextureType === "elytras";
+  const skinSource = pendingTextures.skins?.preview ?? savedTextures.skins;
+  const backSource = activeCape
+    ? (pendingTextures.capes?.preview ?? savedTextures.capes)
+    : activeElytra
+      ? (pendingTextures.elytras?.preview ?? savedTextures.elytras)
+      : null;
 
   useEffect(() => {
     const viewport = logViewportRef.current;
@@ -412,59 +464,68 @@ export default function App() {
     }
   }
 
-  async function chooseSkinFile() {
-    if (skinBusy) return;
-    setSkinBusy(true);
+  async function chooseTextureFile() {
+    if (textureBusy) return;
+    setTextureBusy(true);
     setError("");
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "Minecraft skin PNG", extensions: ["png"] }],
+        filters: [{ name: `Minecraft ${selectedTextureType} PNG`, extensions: ["png"] }],
       });
       if (typeof selected !== "string") return;
-      const preview = await invoke<SkinPreview>("load_skin_preview", {
+      const preview = await invoke<SkinPreview>("load_texture_preview", {
         path: selected,
+        textureType: selectedTextureType,
       });
-      setSkinPreview(preview.dataUrl);
-      setSkinFile(selected);
-      addLog("Скин загружен для предпросмотра.");
+      setPendingTextures((current) => ({
+        ...current,
+        [selectedTextureType]: { path: selected, preview: preview.dataUrl },
+      }));
+      addLog(`${TEXTURE_LABELS[selectedTextureType]} загружена для предпросмотра.`);
     } catch (reason) {
       setError(formatError(reason));
     } finally {
-      setSkinBusy(false);
+      setTextureBusy(false);
     }
   }
 
-  async function saveSkin() {
-    if (!skinFile || skinBusy) return;
-    setSkinBusy(true);
+  async function saveTexture() {
+    const texture = pendingTextures[selectedTextureType];
+    if (!texture || textureBusy) return;
+    setTextureBusy(true);
     setError("");
     try {
-      await invoke("save_skin", { path: skinFile });
-      setHasSavedSkin(true);
-      setSkinFile(null);
-      addLog("Скин сохранён для текущего никнейма.");
+      await invoke("save_texture", {
+        path: texture.path,
+        textureType: selectedTextureType,
+      });
+      setSavedTextures((current) => ({
+        ...current,
+        [selectedTextureType]: texture.preview,
+      }));
+      setPendingTextures((current) => ({ ...current, [selectedTextureType]: null }));
+      addLog(`${TEXTURE_LABELS[selectedTextureType]} сохранена для текущего никнейма.`);
     } catch (reason) {
       setError(formatError(reason));
     } finally {
-      setSkinBusy(false);
+      setTextureBusy(false);
     }
   }
 
-  async function deleteSkin() {
-    if (skinBusy) return;
-    setSkinBusy(true);
+  async function deleteTexture() {
+    if (textureBusy) return;
+    setTextureBusy(true);
     setError("");
     try {
-      await invoke("delete_skin");
-      setSkinPreview(null);
-      setSkinFile(null);
-      setHasSavedSkin(false);
-      addLog("Скин удалён через API.");
+      await invoke("delete_texture", { textureType: selectedTextureType });
+      setSavedTextures((current) => ({ ...current, [selectedTextureType]: null }));
+      setPendingTextures((current) => ({ ...current, [selectedTextureType]: null }));
+      addLog(`${TEXTURE_LABELS[selectedTextureType]} удалена через API.`);
     } catch (reason) {
       setError(formatError(reason));
     } finally {
-      setSkinBusy(false);
+      setTextureBusy(false);
     }
   }
 
@@ -739,7 +800,9 @@ export default function App() {
                         size="sm"
                         className="h-7"
                         onClick={() => void chooseDirectory()}
-                        disabled={busy || skinBusy || updateInstalling || !launcherState}
+                        disabled={
+                          busy || textureBusy || updateInstalling || !launcherState
+                        }
                         title="Выбрать папку"
                       >
                         <FolderOpen size={13} />
@@ -775,7 +838,7 @@ export default function App() {
                     onClick={() => void play()}
                     disabled={
                       busy ||
-                      skinBusy ||
+                      textureBusy ||
                       updateChecking ||
                       updateDownloading ||
                       updateInstalling ||
@@ -925,7 +988,7 @@ export default function App() {
                     onClick={() => void synchronizeConfigs()}
                     disabled={
                       busy ||
-                      skinBusy ||
+                      textureBusy ||
                       gameRunning ||
                       updateChecking ||
                       updateDownloading ||
@@ -945,25 +1008,15 @@ export default function App() {
                 <CardHeader className="mb-2 min-w-0 flex-col items-start gap-1">
                   <CardTitle className="flex min-w-0 items-center gap-2">
                     <UserRound size={14} className="text-lime-300" />
-                    <span className="truncate">Скин игрока</span>
+                    <span className="truncate">Текстуры игрока</span>
                   </CardTitle>
                   <span
                     className="w-full min-w-0 truncate text-[9px] text-[#806d57]"
-                    title={
-                      skinFile
-                        ? `Предпросмотр: ${skinFile.split(/[\\/]/).pop()} • не сохранён`
-                        : hasSavedSkin
-                          ? `Сохранён для ${launcherState?.nickname ?? "игрока"}`
-                          : undefined
-                    }
+                    title={textureDescription}
                   >
                     {!launcherState?.nickname
                       ? "Сначала сохраните никнейм нажатием «Играть»"
-                      : skinFile
-                        ? `Предпросмотр: ${skinFile.split(/[\\/]/).pop()} • не сохранён`
-                        : hasSavedSkin
-                          ? `Сохранён для ${launcherState.nickname}`
-                          : "Для текущего никнейма скин не сохранён"}
+                      : textureDescription}
                   </span>
                 </CardHeader>
                 <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
@@ -975,13 +1028,34 @@ export default function App() {
                     }
                   >
                     <SkinViewer
-                      source={skinPreview}
+                      source={skinSource}
+                      backSource={backSource}
+                      backEquipment={activeCape ? "cape" : activeElytra ? "elytra" : null}
                       model={skinModel}
                       onError={reportSkinPreviewError}
                       onModelDetected={setSkinModel}
                     />
                   </Suspense>
                   <div className="flex shrink-0 flex-col gap-2 sm:w-52">
+                    <p className="text-[9px] uppercase tracking-[0.16em] text-[#9a8872]">
+                      Тип текстуры
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 rounded-md border border-[#49392a] bg-[#17130f] p-1">
+                      {TEXTURE_TYPES.map((textureType) => (
+                        <Button
+                          key={textureType}
+                          variant={
+                            selectedTextureType === textureType ? "primary" : "ghost"
+                          }
+                          size="sm"
+                          className="h-8 justify-center px-1 text-center text-[8px] leading-none"
+                          onClick={() => setSelectedTextureType(textureType)}
+                          disabled={textureBusy}
+                        >
+                          {TEXTURE_LABELS[textureType]}
+                        </Button>
+                      ))}
+                    </div>
                     <p className="text-[9px] uppercase tracking-[0.16em] text-[#9a8872]">
                       Модель персонажа
                     </p>
@@ -991,7 +1065,7 @@ export default function App() {
                         size="sm"
                         className="h-8 justify-center px-2 text-center text-[9px] leading-none"
                         onClick={() => setSkinModel("default")}
-                        disabled={!launcherState?.nickname || busy || skinBusy}
+                        disabled={!launcherState?.nickname || busy || textureBusy}
                       >
                         Classic
                       </Button>
@@ -1000,50 +1074,55 @@ export default function App() {
                         size="sm"
                         className="h-8 justify-center px-2 text-center text-[9px] leading-none"
                         onClick={() => setSkinModel("slim")}
-                        disabled={!launcherState?.nickname || busy || skinBusy}
+                        disabled={!launcherState?.nickname || busy || textureBusy}
                       >
                         Slim
                       </Button>
                     </div>
                     <p className="text-[9px] leading-relaxed text-[#806d57]">
-                      Поддерживаются PNG-текстуры 64×64 и 64×32. Перетащите модель мышью,
-                      чтобы повернуть.
+                      {selectedTextureType === "skins"
+                        ? "Скины PNG: 64×64 или 64×32."
+                        : "PNG с пропорциями 2:1, 22:17 или 23:11."}{" "}
+                      Перетащите модель мышью, чтобы повернуть.
                     </p>
                     <div className="mt-auto grid grid-cols-2 gap-2 sm:grid-cols-1">
                       <Button
                         variant="outline"
                         size="sm"
                         className="w-full"
-                        onClick={() => void chooseSkinFile()}
+                        onClick={() => void chooseTextureFile()}
                         disabled={
-                          !launcherState?.nickname || busy || skinBusy || updateInstalling
+                          !launcherState?.nickname ||
+                          busy ||
+                          textureBusy ||
+                          updateInstalling
                         }
                       >
                         <ImageUp size={13} />
                         Загрузить PNG
                       </Button>
-                      {skinFile && (
+                      {pendingTexture && (
                         <Button
                           variant="primary"
                           size="sm"
                           className="w-full"
-                          onClick={() => void saveSkin()}
-                          disabled={busy || skinBusy || updateInstalling}
+                          onClick={() => void saveTexture()}
+                          disabled={busy || textureBusy || updateInstalling}
                         >
                           <Save size={13} />
                           Сохранить
                         </Button>
                       )}
-                      {hasSavedSkin && (
+                      {hasSavedTexture && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="w-full text-rose-300 hover:text-rose-200"
-                          onClick={() => void deleteSkin()}
-                          disabled={busy || skinBusy || updateInstalling}
+                          onClick={() => void deleteTexture()}
+                          disabled={busy || textureBusy || updateInstalling}
                         >
                           <Trash2 size={13} />
-                          Удалить скин
+                          Удалить {TEXTURE_LABELS[selectedTextureType].toLowerCase()}
                         </Button>
                       )}
                     </div>

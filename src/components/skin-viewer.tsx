@@ -4,6 +4,7 @@ import { IdleAnimation, SkinViewer as SkinViewer3D } from "skinview3d";
 import { Button } from "./ui/button";
 
 export type SkinModel = "default" | "slim";
+export type TextureType = "skins" | "capes" | "elytras";
 
 const VIEWER_WIDTH = 360;
 const VIEWER_HEIGHT = 480;
@@ -48,12 +49,21 @@ function createNeutralSkinTexture() {
 
 interface SkinViewerProps {
   source: string | null;
+  backSource: string | null;
+  backEquipment: "cape" | "elytra" | null;
   model: SkinModel;
   onError: (message: string) => void;
   onModelDetected: (model: SkinModel) => void;
 }
 
-export function SkinViewer({ source, model, onError, onModelDetected }: SkinViewerProps) {
+export function SkinViewer({
+  source,
+  backSource,
+  backEquipment,
+  model,
+  onError,
+  onModelDetected,
+}: SkinViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<SkinViewer3D | null>(null);
 
@@ -120,6 +130,26 @@ export function SkinViewer({ source, model, onError, onModelDetected }: SkinView
       onError(reason instanceof Error ? reason.message : String(reason));
     }
   }, [onError, onModelDetected, source]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    let active = true;
+    if (backSource === null || backEquipment === null) {
+      viewer.loadCape(null);
+      return;
+    }
+
+    void viewer.loadCape(backSource, { backEquipment }).catch((reason: unknown) => {
+      if (active) {
+        onError(reason instanceof Error ? reason.message : String(reason));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [backEquipment, backSource, onError]);
 
   useEffect(() => {
     const viewer = viewerRef.current;

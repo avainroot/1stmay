@@ -30,10 +30,10 @@ pub fn run() {
             commands::save_install_directory,
             commands::play,
             commands::synchronize_config_files,
-            skin::get_current_skin,
-            skin::load_skin_preview,
-            skin::save_skin,
-            skin::delete_skin,
+            skin::get_current_texture,
+            skin::load_texture_preview,
+            skin::save_texture,
+            skin::delete_texture,
             updater::check_and_download_update,
             updater::install_downloaded_update
         ])
